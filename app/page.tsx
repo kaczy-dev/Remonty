@@ -30,12 +30,7 @@ import { AddRoomModal } from '@/components/AddRoomModal';
 import { Sparkles, Bot, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function HomePage() {
-  const [project, setProject] = useState<RenovationProject>(() => {
-    if (typeof window !== 'undefined') {
-      return loadProjectFromStorage();
-    }
-    return DEFAULT_RENOVATION_PROJECT;
-  });
+  const [project, setProject] = useState<RenovationProject>(DEFAULT_RENOVATION_PROJECT);
   const [activePipelineStep, setActivePipelineStep] = useState<RenovationPipelineStep>('measure');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
@@ -43,6 +38,17 @@ export default function HomePage() {
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
 
   const isOnline = useOnlineStatus();
+
+  // Safely hydrate stored project on client without SSR mismatch
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const stored = loadProjectFromStorage();
+      if (stored && stored.id) {
+        setProject(stored);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Save to storage helper
   const updateProject = (newProject: RenovationProject) => {
@@ -92,6 +98,30 @@ export default function HomePage() {
       return {
         ...r,
         furniture: [...r.furniture, furniture],
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  };
+
+  // Update furniture collection (for drag-and-drop & rotation)
+  const handleUpdateFurniture = (roomId: string, furniture: RoomFurniture[]) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        furniture,
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  };
+
+  // Delete furniture
+  const handleDeleteFurniture = (roomId: string, furnitureId: string) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        furniture: r.furniture.filter((f) => f.id !== furnitureId),
       };
     });
     updateProject({ ...project, rooms: updatedRooms });
@@ -234,7 +264,10 @@ export default function HomePage() {
             room={currentRoom}
             onUpdateRoomDimensions={handleUpdateRoomDimensions}
             onAddFurniture={handleAddFurniture}
+            onUpdateFurniture={handleUpdateFurniture}
+            onDeleteFurniture={handleDeleteFurniture}
             onAddOutlet={handleAddOutlet}
+            onUpdateRoomDesign={handleUpdateRoomDesign}
             onNavigateToStep={(s) => setActivePipelineStep(s as RenovationPipelineStep)}
           />
         );
@@ -298,6 +331,8 @@ export default function HomePage() {
               room={currentRoom}
               onUpdateRoomDimensions={handleUpdateRoomDimensions}
               onAddFurniture={handleAddFurniture}
+              onUpdateFurniture={handleUpdateFurniture}
+              onDeleteFurniture={handleDeleteFurniture}
               onAddOutlet={handleAddOutlet}
             />
           </div>

@@ -3,13 +3,15 @@
 import React, { useState } from 'react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useMounted } from '@/hooks/useMounted';
 import { Download, Smartphone, X } from 'lucide-react';
 
 export const PWAInstallButton: React.FC = () => {
+  const mounted = useMounted();
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
-  if (isInstalled) {
+  if (!mounted || isInstalled) {
     return null;
   }
 
@@ -75,10 +77,11 @@ export const PWAInstallButton: React.FC = () => {
 };
 
 export const OfflineIndicator: React.FC<{ isOnline?: boolean }> = ({ isOnline }) => {
+  const mounted = useMounted();
   const hookOnline = useOnlineStatus();
   const online = isOnline !== undefined ? isOnline : hookOnline;
 
-  if (online) return null;
+  if (!mounted || online) return null;
 
   return (
     <div 

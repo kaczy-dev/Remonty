@@ -17,6 +17,8 @@ export interface RoomFurniture {
   height: number;
   rotation: number;
   iconType: string;
+  model3DUrl?: string; // Optional 3D model URL or identifier (e.g. #sofa, #table, #bed, #cabinet, #shelf, or external url)
+  color?: string; // Optional custom color for the 3D mesh
 }
 
 export interface RoomOutlet {
@@ -37,6 +39,7 @@ export interface RoomDetectedEntity {
 }
 
 export interface RoomDesignPreset {
+  style?: string;
   floorType: string;
   floorColor: string;
   wallType: string;

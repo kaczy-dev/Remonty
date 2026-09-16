@@ -13,8 +13,10 @@ import {
   Calculator, 
   Sparkles, 
   SunMedium, 
-  Layers
+  Layers,
+  Box
 } from 'lucide-react';
+import { Room3DViewer } from '@/components/Room3DViewer';
 
 interface ViewDesignMaterialsProps {
   room: Room;
@@ -47,6 +49,7 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
   onUpdateRoomDesign,
 }) => {
   const [activeTab, setActiveTab] = useState<'design' | 'materials' | 'shopping'>('design');
+  const [previewMode, setPreviewMode] = useState<'3d' | 'flat'>('3d');
   const [showAddModal, setShowAddModal] = useState(false);
 
   // New material form state
@@ -174,59 +177,99 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
           
           {/* Visual Ambiance / Moodboard Preview Box */}
           <div className="lg:col-span-6 rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4 flex flex-col justify-between">
-            <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-teal-400" />
-                Wizualna Karta Materiałowa Pomieszczenia
-              </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Wybierz wykończenie posadzki i kolory ścian, aby natychmiast zobaczyć nastrój przestrzenny.
-              </p>
-            </div>
-
-            {/* Simulated 3D Room Layer Composite */}
-            <div 
-              className="relative w-full aspect-[4/3] rounded-xl overflow-hidden border border-slate-700/80 p-5 flex flex-col justify-between shadow-2xl transition-all duration-300"
-              style={{
-                backgroundColor: room.design.wallColor,
-                filter: `brightness(${room.design.lightingTempK === 2700 ? '0.96' : '1.02'})`,
-              }}
-            >
-              {/* Lighting Glow Overlay */}
-              <div 
-                className="absolute inset-0 pointer-events-none transition-opacity duration-300"
-                style={{
-                  background: room.design.lightingTempK === 2700 
-                    ? 'radial-gradient(circle at 50% 20%, rgba(251, 191, 36, 0.25) 0%, transparent 70%)'
-                    : room.design.lightingTempK === 4000
-                    ? 'radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.2) 0%, transparent 70%)'
-                    : 'radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.25) 0%, transparent 70%)',
-                }}
-              />
-
-              {/* Top Tag */}
-              <div className="relative z-10 flex items-center justify-between">
-                <span className="rounded-lg bg-slate-950/80 backdrop-blur-md px-2.5 py-1 text-xs font-semibold text-white border border-slate-700">
-                  {room.name} • {room.area.toFixed(1)} m²
-                </span>
-                <span className="rounded-lg bg-slate-950/80 backdrop-blur-md px-2.5 py-1 text-[11px] font-mono text-amber-300 border border-slate-700">
-                  {room.design.lightingTempK}K Oświetlenie
-                </span>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-teal-400" />
+                  Wizualizacja Wnętrza na Żywo
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Wybieraj materiały i kolory — scena 3D aktualizuje się w czasie rzeczywistym.
+                </p>
               </div>
 
-              {/* Bottom Simulated Floor Strip */}
+              {/* 3D vs 2D Switcher */}
+              <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+                <button
+                  id="preview-mode-3d-btn"
+                  onClick={() => setPreviewMode('3d')}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                    previewMode === '3d'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Box className="w-3.5 h-3.5" />
+                  <span>3D Realistyczny</span>
+                </button>
+                <button
+                  id="preview-mode-flat-btn"
+                  onClick={() => setPreviewMode('flat')}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                    previewMode === 'flat'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Karta 2D</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3D WebGL Scene or 2D Composite */}
+            {previewMode === '3d' ? (
+              <div className="w-full">
+                <Room3DViewer 
+                  room={room} 
+                  onUpdateRoomDesign={onUpdateRoomDesign} 
+                  className="border-slate-700/80 shadow-inner"
+                />
+              </div>
+            ) : (
+              /* Simulated 2D Room Layer Composite */
               <div 
-                className="relative z-10 w-full h-36 rounded-lg border-t-2 border-slate-900/60 p-3 flex flex-col justify-end shadow-xl transition-all duration-300"
+                className="relative w-full aspect-[4/3] rounded-xl overflow-hidden border border-slate-700/80 p-5 flex flex-col justify-between shadow-2xl transition-all duration-300"
                 style={{
-                  backgroundColor: room.design.floorColor,
+                  backgroundColor: room.design.wallColor,
+                  filter: `brightness(${room.design.lightingTempK === 2700 ? '0.96' : '1.02'})`,
                 }}
               >
-                <div className="rounded bg-slate-950/80 backdrop-blur-xs px-2 py-1 text-[11px] font-medium text-white max-w-max border border-slate-700">
-                  Posadzka: {room.design.floorType}
+                {/* Lighting Glow Overlay */}
+                <div 
+                  className="absolute inset-0 pointer-events-none transition-opacity duration-300"
+                  style={{
+                    background: room.design.lightingTempK === 2700 
+                      ? 'radial-gradient(circle at 50% 20%, rgba(251, 191, 36, 0.25) 0%, transparent 70%)'
+                      : room.design.lightingTempK === 4000
+                      ? 'radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.2) 0%, transparent 70%)'
+                      : 'radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.25) 0%, transparent 70%)',
+                  }}
+                />
+
+                {/* Top Tag */}
+                <div className="relative z-10 flex items-center justify-between">
+                  <span className="rounded-lg bg-slate-950/80 backdrop-blur-md px-2.5 py-1 text-xs font-semibold text-white border border-slate-700">
+                    {room.name} • {room.area.toFixed(1)} m²
+                  </span>
+                  <span className="rounded-lg bg-slate-950/80 backdrop-blur-md px-2.5 py-1 text-[11px] font-mono text-amber-300 border border-slate-700">
+                    {room.design.lightingTempK}K Oświetlenie
+                  </span>
+                </div>
+
+                {/* Bottom Simulated Floor Strip */}
+                <div 
+                  className="relative z-10 w-full h-36 rounded-lg border-t-2 border-slate-900/60 p-3 flex flex-col justify-end shadow-xl transition-all duration-300"
+                  style={{
+                    backgroundColor: room.design.floorColor,
+                  }}
+                >
+                  <div className="rounded bg-slate-950/80 backdrop-blur-xs px-2 py-1 text-[11px] font-medium text-white max-w-max border border-slate-700">
+                    Posadzka: {room.design.floorType}
+                  </div>
                 </div>
               </div>
-
-            </div>
+            )}
 
             {/* Lighting Temperature Selector */}
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3 space-y-2">
