@@ -1,0 +1,6 @@
+{
+  "name": "RenovAI",
+  "description": "Lokalny, privacy-first asystent projektowania i remontu mieszkania z analizą foto, kosztorysem, harmonogramem prac i trybem offline PWA.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
