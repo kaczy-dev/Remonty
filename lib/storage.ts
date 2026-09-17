@@ -1,5 +1,6 @@
 import { RenovationProject } from '@/types/renovation';
 import { INITIAL_RENOVATION_PROJECT } from './default-data';
+import { getDefaultWorkStagesForRoom } from './progress-helper';
 
 const STORAGE_KEY = 'renovai_project_v1';
 const E2EE_PASS_HASH_KEY = 'renovai_vault_hash';
@@ -11,7 +12,19 @@ export function loadProjectFromStorage(): RenovationProject {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
+      const parsed: RenovationProject = JSON.parse(raw);
+      // Ensure all rooms have workStages populated
+      if (parsed.rooms && Array.isArray(parsed.rooms)) {
+        parsed.rooms = parsed.rooms.map((room) => {
+          if (!room.workStages || room.workStages.length === 0) {
+            return {
+              ...room,
+              workStages: getDefaultWorkStagesForRoom(room.type, room.id),
+            };
+          }
+          return room;
+        });
+      }
       return parsed;
     }
   } catch (e) {

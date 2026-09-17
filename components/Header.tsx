@@ -11,13 +11,17 @@ import {
   PlusCircle, 
   Layers, 
   Lock,
-  Compass
+  Compass,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   project: RenovationProject;
   isOnline: boolean;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
   onSelectRoom: (roomId: string) => void;
   onOpenAddExpense: () => void;
   onOpenNotifications: () => void;
@@ -29,6 +33,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   project,
   isOnline,
+  theme = 'dark',
+  onToggleTheme,
   onSelectRoom,
   onOpenAddExpense,
   onOpenNotifications,
@@ -134,6 +140,28 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
               )}
             </div>
+
+            {/* Theme Switcher Toggle (Dark Mode / Light Mode) */}
+            {onToggleTheme && (
+              <button
+                id="theme-toggle-btn"
+                onClick={onToggleTheme}
+                title={theme === 'dark' ? 'Przełącz na Tryb Jasny (Light Mode)' : 'Przełącz na Tryb Ciemny (Dark Mode)'}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition shadow-xs"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <span className="hidden sm:inline text-[11px]">Jasny</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-400" />
+                    <span className="hidden sm:inline text-[11px]">Ciemny</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {/* Notification Bell */}
             <button

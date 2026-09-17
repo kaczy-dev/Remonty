@@ -1,4 +1,5 @@
 import { RenovationProject } from '@/types/renovation';
+import { getDefaultWorkStagesForRoom } from './progress-helper';
 
 export const INITIAL_RENOVATION_PROJECT: RenovationProject = {
   id: 'renovai-proj-01',
@@ -24,6 +25,7 @@ export const INITIAL_RENOVATION_PROJECT: RenovationProject = {
       area: 6.25,
       wallArea: 23.8,
       perimeter: 10.0,
+      workStages: getDefaultWorkStagesForRoom('lazienka', 'room-bathroom'),
       notes: 'Odpływ liniowy posadzkowy, hydroizolacja 2-warstwowa, stelaż podtynkowy WC, bateria podtynkowa czarny mat.',
       photoUrl: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80',
       beforePhotoUrl: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
@@ -68,6 +70,7 @@ export const INITIAL_RENOVATION_PROJECT: RenovationProject = {
       area: 28.32,
       wallArea: 48.5,
       perimeter: 21.4,
+      workStages: getDefaultWorkStagesForRoom('salon', 'room-living'),
       notes: 'Otwarta przestrzeń dzienna, podłoga dąb naturalny jodełka, wyspa kuchenna z płytą indukcyjną i pochłaniaczem.',
       photoUrl: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80',
       beforePhotoUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80',
@@ -111,6 +114,7 @@ export const INITIAL_RENOVATION_PROJECT: RenovationProject = {
       area: 14.45,
       wallArea: 35.8,
       perimeter: 15.3,
+      workStages: getDefaultWorkStagesForRoom('sypialnia', 'room-bedroom'),
       notes: 'Garderoba w zabudowie sufitowej, lamele akustyczne za wezgłowiem łóżka, zaciemniające rolety kasetowe.',
       photoUrl: 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?auto=format&fit=crop&w=1200&q=80',
       design: {
@@ -147,6 +151,7 @@ export const INITIAL_RENOVATION_PROJECT: RenovationProject = {
       area: 8.14,
       wallArea: 27.5,
       perimeter: 11.8,
+      workStages: getDefaultWorkStagesForRoom('przedpokoj', 'room-hallway'),
       notes: 'Rozdzielnica elektryczna Hager 4x18 modułów, płytki gresowe przy wejściu płynnie połączone z deską.',
       photoUrl: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80',
       design: {

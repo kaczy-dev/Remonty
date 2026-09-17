@@ -1,3 +1,95 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Light mode high-contrast readability rules */
+html.theme-light,
+.theme-light {
+  color-scheme: light;
+}
+
+html.theme-light body,
+.theme-light body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.theme-light .bg-slate-950,
+.theme-light .bg-slate-950\/90,
+.theme-light .bg-slate-950\/80,
+.theme-light .bg-slate-950\/70,
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/50,
+.theme-light .bg-slate-950\/40 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-slate-900,
+.theme-light .bg-slate-900\/90,
+.theme-light .bg-slate-900\/80,
+.theme-light .bg-slate-900\/70,
+.theme-light .bg-slate-900\/60,
+.theme-light .bg-slate-900\/40 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-slate-850,
+.theme-light .bg-slate-800,
+.theme-light .bg-slate-800\/60,
+.theme-light .bg-slate-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light .border-slate-900,
+.theme-light .border-slate-800,
+.theme-light .border-slate-800\/80,
+.theme-light .border-slate-800\/60,
+.theme-light .border-slate-700,
+.theme-light .border-slate-700\/80,
+.theme-light .border-slate-700\/60 {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .text-white,
+.theme-light .text-slate-100,
+.theme-light .text-slate-200 {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-300 {
+  color: #1e293b !important;
+}
+
+.theme-light .text-slate-400 {
+  color: #334155 !important;
+}
+
+.theme-light .text-slate-500 {
+  color: #475569 !important;
+}
+
+.theme-light input:not([type="color"]):not([type="checkbox"]):not([type="radio"]),
+.theme-light select,
+.theme-light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Subtle CSS pulse animation for floating AI action button */
+@keyframes subtle-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 10px 25px -5px rgba(20, 184, 166, 0.4), 0 8px 10px -6px rgba(20, 184, 166, 0.2);
+  }
+  50% {
+    transform: scale(1.035);
+    box-shadow: 0 20px 35px -5px rgba(20, 184, 166, 0.65), 0 10px 16px -4px rgba(6, 182, 212, 0.45);
+  }
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 2.8s ease-in-out infinite;
+}
+
+
+

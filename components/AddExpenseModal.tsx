@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Expense, ExpenseCategory, Room } from '@/types/renovation';
 import { X, Wallet, Receipt, Plus } from 'lucide-react';
 
@@ -38,8 +39,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<Expense['paymentMethod']>('Karta / Przelew');
   const [receiptNote, setReceiptNote] = useState('');
 
-  if (!isOpen) return null;
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !amount || Number(amount) <= 0) return;
@@ -61,24 +60,37 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-100">
-        
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-500/20 text-teal-400">
-              <Wallet className="w-4 h-4" />
-            </div>
-            <h3 className="text-sm font-bold text-white">Rejestracja Wydatku / Faktury</h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, y: 20, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.95, y: 20, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl text-slate-100"
           >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-500/20 text-teal-400">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Rejestracja Wydatku / Faktury</h3>
+              </div>
+              <button
+                onClick={onClose}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <div>
@@ -205,7 +217,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
           </div>
         </form>
 
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };

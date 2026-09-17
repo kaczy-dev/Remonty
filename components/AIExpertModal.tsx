@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Room } from '@/types/renovation';
 import { Sparkles, X, Send, Bot, User, Check, Loader2, Lightbulb } from 'lucide-react';
 
@@ -9,6 +10,7 @@ interface AIExpertModalProps {
   onClose: () => void;
   currentRoom: Room;
   currentStep: string;
+  initialPrompt?: string;
 }
 
 const SAMPLE_PROMPTS = [
@@ -23,17 +25,23 @@ export const AIExpertModal: React.FC<AIExpertModalProps> = ({
   onClose,
   currentRoom,
   currentStep,
+  initialPrompt,
 }) => {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initialPrompt || '');
+  const [prevInitialPrompt, setPrevInitialPrompt] = useState(initialPrompt);
   const [loading, setLoading] = useState(false);
+
+  // Sync initialPrompt without synchronous setState in effect
+  if (initialPrompt !== prevInitialPrompt) {
+    setPrevInitialPrompt(initialPrompt);
+    setPrompt(initialPrompt || '');
+  }
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([
     {
       role: 'assistant',
       text: `Dzień dobry! Jestem Twoim prywatnym doradcą budowlanym RenovAI. Analizuję aktualnie: **${currentRoom.name}** (${currentRoom.area.toFixed(1)} m²) na etapie **${currentStep.toUpperCase()}**.\n\nZapytaj mnie o normy techniczne, dobór chemii budowlanej, czasy schnięcia lub weryfikację poprawności prac wykonawcy.`,
     },
   ]);
-
-  if (!isOpen) return null;
 
   const handleSend = async (questionToSend?: string) => {
     const textQuery = questionToSend || prompt;
@@ -80,10 +88,23 @@ export const AIExpertModal: React.FC<AIExpertModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
-      <div className="w-full max-w-2xl rounded-2xl border border-teal-500/40 bg-slate-900 shadow-2xl flex flex-col h-[650px] max-h-[90vh] overflow-hidden text-slate-100">
-        
-        {/* Header */}
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, y: 20, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.95, y: 20, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="w-full max-w-2xl rounded-2xl border border-teal-500/40 bg-slate-900 shadow-2xl flex flex-col h-[650px] max-h-[90vh] overflow-hidden text-slate-100"
+          >
+            
+            {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-5 py-4">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-slate-950 font-bold">
@@ -192,7 +213,9 @@ export const AIExpertModal: React.FC<AIExpertModalProps> = ({
           </form>
         </div>
 
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };

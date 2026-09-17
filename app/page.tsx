@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   RenovationProject, 
   RenovationPipelineStep, 
@@ -10,10 +11,13 @@ import {
   QAChecklistItem,
   NotificationItem,
   RoomFurniture,
-  RoomOutlet
+  RoomOutlet,
+  RoomWorkStage,
+  StageStatus
 } from '@/types/renovation';
 import { loadProjectFromStorage, saveProjectToStorage } from '@/lib/storage';
 import { DEFAULT_RENOVATION_PROJECT } from '@/lib/default-data';
+import { getRoomWorkStages } from '@/lib/progress-helper';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { Header } from '@/components/Header';
 import { WorkflowPipeline } from '@/components/WorkflowPipeline';
@@ -23,32 +27,51 @@ import { ViewDesignMaterials } from '@/components/ViewDesignMaterials';
 import { ViewBudgetExpenses } from '@/components/ViewBudgetExpenses';
 import { ViewScheduleTimeline } from '@/components/ViewScheduleTimeline';
 import { ViewProgressQA } from '@/components/ViewProgressQA';
+import { ViewRenovationProgress } from '@/components/ViewRenovationProgress';
+import { ProjectProgressIndicator } from '@/components/ProjectProgressIndicator';
 import { AddExpenseModal } from '@/components/AddExpenseModal';
 import { AIExpertModal } from '@/components/AIExpertModal';
 import { E2EEVaultModal } from '@/components/E2EEVaultModal';
 import { AddRoomModal } from '@/components/AddRoomModal';
+import { FloatingAIAssistant } from '@/components/FloatingAIAssistant';
 import { Sparkles, Bot, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function HomePage() {
   const [project, setProject] = useState<RenovationProject>(DEFAULT_RENOVATION_PROJECT);
   const [activePipelineStep, setActivePipelineStep] = useState<RenovationPipelineStep>('measure');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [aiPrefilledPrompt, setAiPrefilledPrompt] = useState<string>('');
   const [isE2EEModalOpen, setIsE2EEModalOpen] = useState(false);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
 
   const isOnline = useOnlineStatus();
 
-  // Safely hydrate stored project on client without SSR mismatch
+  // Safely hydrate stored project and theme on client without SSR mismatch
   useEffect(() => {
     const timer = setTimeout(() => {
       const stored = loadProjectFromStorage();
       if (stored && stored.id) {
         setProject(stored);
       }
+      const savedTheme = localStorage.getItem('renovai_theme') as 'dark' | 'light' | null;
+      if (savedTheme) {
+        setTheme(savedTheme);
+        document.documentElement.classList.toggle('theme-light', savedTheme === 'light');
+      }
     }, 0);
     return () => clearTimeout(timer);
   }, []);
+
+  const handleToggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('renovai_theme', next);
+      document.documentElement.classList.toggle('theme-light', next === 'light');
+      return next;
+    });
+  };
 
   // Save to storage helper
   const updateProject = (newProject: RenovationProject) => {
@@ -245,6 +268,62 @@ export default function HomePage() {
     });
   };
 
+  // Room Work Stages Handlers for Progress Tracking
+  const handleUpdateRoomStages = (roomId: string, stages: RoomWorkStage[]) => {
+    const isCompleted = stages.length > 0 && stages.every((s) => s.completed || s.status === 'done');
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        workStages: stages,
+        isCompleted,
+      };
+    });
+    updateProject({
+      ...project,
+      rooms: updatedRooms,
+    });
+  };
+
+  const handleToggleRoomCompleted = (roomId: string, completed: boolean) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      const currentStages = getRoomWorkStages(r);
+      const updatedStages = currentStages.map((st) => ({
+        ...st,
+        completed,
+        status: (completed ? 'done' : 'in_progress') as StageStatus,
+        completedAt: completed ? (st.completedAt || new Date().toISOString().slice(0, 10)) : undefined,
+      }));
+      return {
+        ...r,
+        isCompleted: completed,
+        workStages: updatedStages,
+      };
+    });
+    updateProject({
+      ...project,
+      rooms: updatedRooms,
+    });
+  };
+
+  const handleQuickToggleStage = (roomId: string, stageId: string) => {
+    const targetRoom = project.rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+    const stages = getRoomWorkStages(targetRoom);
+    const updatedStages = stages.map((st) => {
+      if (st.id !== stageId) return st;
+      const willBeCompleted = !st.completed;
+      return {
+        ...st,
+        completed: willBeCompleted,
+        status: (willBeCompleted ? 'done' : 'in_progress') as StageStatus,
+        completedAt: willBeCompleted ? new Date().toISOString().slice(0, 10) : undefined,
+      };
+    });
+    handleUpdateRoomStages(roomId, updatedStages);
+  };
+
   // Add Room
   const handleAddRoom = (newRoom: Room) => {
     updateProject({
@@ -348,6 +427,11 @@ export default function HomePage() {
             onToggleMaterialPurchased={handleToggleMaterialPurchased}
             onAddMaterial={handleAddMaterial}
             onUpdateRoomDesign={handleUpdateRoomDesign}
+            onUpdateFurniture={handleUpdateFurniture}
+            onConsultAI={(prompt) => {
+              setAiPrefilledPrompt(prompt);
+              setIsAIModalOpen(true);
+            }}
           />
         );
 
@@ -375,6 +459,21 @@ export default function HomePage() {
         );
 
       case 'progress':
+        return (
+          <ViewRenovationProgress
+            rooms={project.rooms}
+            selectedRoomId={project.selectedRoomId}
+            onSelectRoom={handleSelectRoom}
+            onUpdateRoomStages={handleUpdateRoomStages}
+            onToggleRoomCompleted={handleToggleRoomCompleted}
+            onConsultAI={(prompt) => {
+              setAiPrefilledPrompt(prompt);
+              setIsAIModalOpen(true);
+            }}
+            onNavigateToStep={(s) => setActivePipelineStep(s as RenovationPipelineStep)}
+          />
+        );
+
       case 'qa':
       case 'before_after':
         return (
@@ -397,7 +496,9 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col selection:bg-teal-500/30">
+    <div className={`min-h-screen flex flex-col selection:bg-teal-500/30 transition-colors duration-200 ${
+      theme === 'light' ? 'theme-light bg-slate-100 text-slate-900' : 'bg-slate-950 text-slate-100'
+    }`}>
       
       {/* Offline Status Warning Bar if offline */}
       <OfflineIndicator />
@@ -406,6 +507,8 @@ export default function HomePage() {
       <Header
         project={project}
         isOnline={isOnline}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
         onSelectRoom={handleSelectRoom}
         onOpenAddExpense={() => setIsExpenseModalOpen(true)}
         onOpenNotifications={() => setActivePipelineStep('plan')}
@@ -420,9 +523,30 @@ export default function HomePage() {
         onSelectStep={(step) => setActivePipelineStep(step)}
       />
 
-      {/* Core Dynamic Content Area */}
-      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6">
-        {renderStepContent()}
+      {/* Core Dynamic Content Area with Step Transitions */}
+      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Visual Renovation Progress Indicator Banner on Main Screen */}
+        {activePipelineStep !== 'progress' && (
+          <ProjectProgressIndicator
+            rooms={project.rooms}
+            selectedRoomId={project.selectedRoomId}
+            onSelectRoom={handleSelectRoom}
+            onOpenProgressPage={() => setActivePipelineStep('progress')}
+            onToggleStage={handleQuickToggleStage}
+          />
+        )}
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activePipelineStep}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            {renderStepContent()}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* Footer */}
@@ -437,15 +561,16 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Floating Action Button for AI Engineering Assistant */}
-      <button
-        id="floating-ai-consult-btn"
-        onClick={() => setIsAIModalOpen(true)}
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-teal-500 to-cyan-600 px-4 py-3 text-xs font-bold text-slate-950 shadow-xl shadow-teal-500/25 hover:scale-105 transition active:scale-95"
-      >
-        <Sparkles className="w-4 h-4 text-slate-950" />
-        <span className="hidden sm:inline">Doradca AI</span>
-      </button>
+      {/* Floating Action Button for AI Engineering Assistant with Draggable Handle & Quick Actions */}
+      <FloatingAIAssistant
+        currentRoom={currentRoom}
+        currentStep={activePipelineStep}
+        project={project}
+        onOpenFullModal={(prompt) => {
+          if (prompt) setAiPrefilledPrompt(prompt);
+          setIsAIModalOpen(true);
+        }}
+      />
 
       {/* Modals */}
       <AddExpenseModal
@@ -461,6 +586,7 @@ export default function HomePage() {
         onClose={() => setIsAIModalOpen(false)}
         currentRoom={currentRoom}
         currentStep={activePipelineStep}
+        initialPrompt={aiPrefilledPrompt}
       />
 
       <E2EEVaultModal

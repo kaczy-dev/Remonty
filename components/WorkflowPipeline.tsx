@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { motion } from 'framer-motion';
 import { RenovationPipelineStep } from '@/types/renovation';
 import { 
   Camera, 
@@ -86,20 +87,31 @@ export const WorkflowPipeline: React.FC<WorkflowPipelineProps> = ({
             const isCompleted = idx < currentIndex;
 
             return (
-              <button
+              <motion.button
                 key={step.id}
                 id={`pipeline-step-${step.id}`}
                 onClick={() => onSelectStep(step.id)}
-                className={`group flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-left transition-all relative ${
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className={`group flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors relative ${
                   isActive
-                    ? 'bg-teal-500/15 border border-teal-500/50 text-white shadow-xs'
+                    ? 'text-white'
                     : isCompleted
                     ? 'bg-slate-800/60 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
                     : 'bg-slate-900/40 border border-slate-800/80 text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
                 }`}
               >
+                {/* Active Step Sliding Highlight via Framer Motion layoutId */}
+                {isActive && (
+                  <motion.div
+                    layoutId="pipeline-active-indicator"
+                    className="absolute inset-0 rounded-xl bg-teal-500/15 border border-teal-500/60 shadow-xs pointer-events-none"
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+
                 <div 
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs transition ${
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs relative z-10 transition ${
                     isActive
                       ? 'bg-teal-500 text-slate-950 font-bold'
                       : isCompleted
@@ -109,7 +121,7 @@ export const WorkflowPipeline: React.FC<WorkflowPipelineProps> = ({
                 >
                   <Icon className="w-3.5 h-3.5" />
                 </div>
-                <div className="flex flex-col">
+                <div className="flex flex-col relative z-10">
                   <span className={`text-[11px] font-bold tracking-tight uppercase leading-none ${
                     isActive ? 'text-teal-300' : 'text-slate-300'
                   }`}>
@@ -119,7 +131,7 @@ export const WorkflowPipeline: React.FC<WorkflowPipelineProps> = ({
                     {step.subLabel}
                   </span>
                 </div>
-              </button>
+              </motion.button>
             );
           })}
         </div>

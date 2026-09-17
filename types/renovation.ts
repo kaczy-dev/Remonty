@@ -42,11 +42,30 @@ export interface RoomDesignPreset {
   style?: string;
   floorType: string;
   floorColor: string;
+  floorTexture?: 'herringbone' | 'plank' | 'tiles' | 'marble' | 'microcement' | 'terrazzo' | 'hexagonal';
+  floorRoughness?: number; // 0.1 to 0.95
+  floorScale?: number; // repetition scale
   wallType: string;
   wallColor: string;
+  wallTexture?: 'matte' | 'brick' | 'slats' | 'concrete_panels' | 'subway_tiles' | 'marble' | 'stucco';
+  wallRoughness?: number;
+  wallScale?: number;
+  tileType?: string;
+  tileColor?: string;
   ceilingColor: string;
   accentWallColor?: string;
   lightingTempK: number; // 2700 (warm), 4000 (neutral), 6000 (cool)
+}
+
+export interface RoomWorkStage {
+  id: string;
+  name: string;
+  category: StageCategory;
+  completed: boolean;
+  status: StageStatus;
+  completedAt?: string;
+  notes?: string;
+  order: number;
 }
 
 export interface Room {
@@ -68,6 +87,8 @@ export interface Room {
   beforePhotoUrl?: string;
   afterPhotoUrl?: string;
   notes: string;
+  workStages?: RoomWorkStage[];
+  isCompleted?: boolean;
 }
 
 export type StageCategory = 

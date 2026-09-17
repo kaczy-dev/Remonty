@@ -12,6 +12,12 @@ import {
   createTileTexture, 
   createMicrocementTexture, 
   createBrickTexture,
+  createMarbleTexture,
+  createTerrazzoTexture,
+  createWoodSlatsTexture,
+  createConcretePanelsTexture,
+  createSubwayTileTexture,
+  createStuccoTexture,
   kelvinToHex
 } from '@/lib/procedural-textures';
 import { create3DFurnitureMesh } from '@/lib/furniture3d-builder';
@@ -38,7 +44,8 @@ import {
   Armchair,
   Monitor,
   AlertTriangle,
-  ShieldCheck
+  ShieldCheck,
+  Footprints
 } from 'lucide-react';
 
 interface Room3DViewerProps {
@@ -48,6 +55,7 @@ interface Room3DViewerProps {
   onDeleteFurniture?: (roomId: string, furnitureId: string) => void;
   className?: string;
   onOpenShowcase?: () => void;
+  onOpenWalkthrough?: () => void;
 }
 
 type LightingPreset = 'day' | 'sunset' | 'night';
@@ -60,6 +68,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   onDeleteFurniture,
   className = '',
   onOpenShowcase,
+  onOpenWalkthrough,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -598,14 +607,20 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     // --- 1. FLOOR ---
     let floorTexture: THREE.CanvasTexture;
     const floorTypeStr = (room.design.floorType || '').toLowerCase();
+    const explicitFloorTexture = room.design.floorTexture;
     const floorColor = room.design.floorColor || '#b48256';
+    const floorRoughness = room.design.floorRoughness !== undefined ? room.design.floorRoughness : 0.32;
 
-    if (floorTypeStr.includes('jodeł') || floorTypeStr.includes('dąb') || floorTypeStr.includes('panel')) {
+    if (explicitFloorTexture === 'herringbone' || (!explicitFloorTexture && (floorTypeStr.includes('jodeł') || floorTypeStr.includes('dąb') || floorTypeStr.includes('panel')))) {
       floorTexture = createWoodTexture('herringbone', floorColor);
-    } else if (floorTypeStr.includes('gres') || floorTypeStr.includes('kamień') || floorTypeStr.includes('płytki')) {
-      floorTexture = createTileTexture(floorColor);
-    } else if (floorTypeStr.includes('mikrocement') || floorTypeStr.includes('beton')) {
+    } else if (explicitFloorTexture === 'marble' || (!explicitFloorTexture && floorTypeStr.includes('marmur'))) {
+      floorTexture = createMarbleTexture(floorColor);
+    } else if (explicitFloorTexture === 'terrazzo' || (!explicitFloorTexture && (floorTypeStr.includes('terrazzo') || floorTypeStr.includes('lastryko')))) {
+      floorTexture = createTerrazzoTexture(floorColor);
+    } else if (explicitFloorTexture === 'microcement' || (!explicitFloorTexture && (floorTypeStr.includes('mikrocement') || floorTypeStr.includes('beton')))) {
       floorTexture = createMicrocementTexture(floorColor);
+    } else if (explicitFloorTexture === 'tiles' || (!explicitFloorTexture && (floorTypeStr.includes('gres') || floorTypeStr.includes('kamień') || floorTypeStr.includes('płytki')))) {
+      floorTexture = createTileTexture(floorColor);
     } else {
       floorTexture = createWoodTexture('plank', floorColor);
     }
@@ -613,8 +628,8 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const floorGeo = new THREE.BoxGeometry(W, 0.08, L);
     const floorMat = new THREE.MeshStandardMaterial({
       map: floorTexture,
-      roughness: 0.32,
-      metalness: 0.05,
+      roughness: floorRoughness,
+      metalness: floorRoughness < 0.2 ? 0.15 : 0.04,
     });
     const floorMesh = new THREE.Mesh(floorGeo, floorMat);
     floorMesh.position.set(0, -0.04, 0);
@@ -651,13 +666,30 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     // --- 3. WALLS ---
     const wallThick = 0.16;
     const wallColor = room.design.wallColor || '#f8fafc';
-    const isBrick = (room.design.wallType || '').toLowerCase().includes('cegła');
+    const wallTypeStr = (room.design.wallType || '').toLowerCase();
+    const explicitWallTexture = room.design.wallTexture;
+    const wallRoughness = room.design.wallRoughness !== undefined ? room.design.wallRoughness : 0.85;
+
+    let wallTex: THREE.CanvasTexture | undefined;
+    if (explicitWallTexture === 'brick' || (!explicitWallTexture && wallTypeStr.includes('cegła'))) {
+      wallTex = createBrickTexture(wallColor);
+    } else if (explicitWallTexture === 'slats' || (!explicitWallTexture && wallTypeStr.includes('lamele'))) {
+      wallTex = createWoodSlatsTexture(wallColor);
+    } else if (explicitWallTexture === 'concrete_panels' || (!explicitWallTexture && (wallTypeStr.includes('beton architektoniczny') || wallTypeStr.includes('płyty betonowe')))) {
+      wallTex = createConcretePanelsTexture(wallColor);
+    } else if (explicitWallTexture === 'subway_tiles' || (!explicitWallTexture && (wallTypeStr.includes('metro') || wallTypeStr.includes('cegiełki')))) {
+      wallTex = createSubwayTileTexture(wallColor);
+    } else if (explicitWallTexture === 'marble' || (!explicitWallTexture && wallTypeStr.includes('marmur'))) {
+      wallTex = createMarbleTexture(wallColor);
+    } else if (explicitWallTexture === 'stucco' || (!explicitWallTexture && (wallTypeStr.includes('tynk') || wallTypeStr.includes('stiuk')))) {
+      wallTex = createStuccoTexture(wallColor);
+    }
 
     const wallMat = new THREE.MeshStandardMaterial({
-      color: isBrick ? undefined : wallColor,
-      map: isBrick ? createBrickTexture(wallColor) : undefined,
-      roughness: 0.85,
-      metalness: 0.02,
+      color: wallTex ? undefined : wallColor,
+      map: wallTex,
+      roughness: wallRoughness,
+      metalness: wallRoughness < 0.25 ? 0.15 : 0.02,
       side: THREE.DoubleSide,
     });
 
@@ -1411,6 +1443,17 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
               <span>Rzut z góry</span>
             </button>
           </div>
+
+          {onOpenWalkthrough && (
+            <button
+              onClick={onOpenWalkthrough}
+              className="flex items-center gap-1.5 rounded-2xl border border-teal-400/50 bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 px-3 py-2 text-xs font-bold text-slate-950 backdrop-blur-md shadow-lg transition active:scale-95"
+              title="Przejdź do wirtualnego spaceru pierwszoosobowego 3D"
+            >
+              <Footprints className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Spacer 3D</span>
+            </button>
+          )}
 
           {onOpenShowcase && (
             <button
