@@ -1,0 +1,689 @@
+'use client';
+
+import React, { useState, useLayoutEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  RenovationProject, 
+  RenovationPipelineStep, 
+  Room, 
+  Expense, 
+  MaterialCalculation, 
+  QAChecklistItem,
+  NotificationItem,
+  RoomFurniture,
+  RoomOutlet,
+  RoomWorkStage,
+  StageStatus,
+  WorkLogEntry
+} from '@/types/renovation';
+import { loadOrMigrateInitialProject, saveProjectToDB, getAllProjectsFromDB, deleteProjectFromDB } from '@/lib/db';
+import { DEFAULT_RENOVATION_PROJECT } from '@/lib/default-data';
+import { getRoomWorkStages } from '@/lib/progress-helper';
+import { duplicateProject } from '@/lib/project-templates';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { Header } from '@/components/Header';
+import { WorkflowPipeline } from '@/components/WorkflowPipeline';
+import { OfflineIndicator } from '@/components/PWAInstallButton';
+import { ViewRoomScanMeasure } from '@/components/ViewRoomScanMeasure';
+import { ViewDesignMaterials } from '@/components/ViewDesignMaterials';
+import { ViewBudgetExpenses } from '@/components/ViewBudgetExpenses';
+import { ViewScheduleTimeline } from '@/components/ViewScheduleTimeline';
+import { ViewProgressQA } from '@/components/ViewProgressQA';
+import { ViewRenovationProgress } from '@/components/ViewRenovationProgress';
+import { ProjectProgressIndicator } from '@/components/ProjectProgressIndicator';
+import { AddExpenseModal } from '@/components/AddExpenseModal';
+import { AIExpertModal } from '@/components/AIExpertModal';
+import { BackupModal } from '@/components/BackupModal';
+import { AddRoomModal } from '@/components/AddRoomModal';
+import { ReportGeneratorModal } from '@/components/ReportGeneratorModal';
+import { ProjectSwitcherModal } from '@/components/ProjectSwitcherModal';
+import { FloatingAIAssistant } from '@/components/FloatingAIAssistant';
+
+export default function HomePage() {
+  const [project, setProject] = useState<RenovationProject>(() => structuredClone(DEFAULT_RENOVATION_PROJECT));
+  const [allProjects, setAllProjects] = useState<RenovationProject[]>([]);
+  const [activePipelineStep, setActivePipelineStep] = useState<RenovationPipelineStep>('measure');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isProjectSwitcherOpen, setIsProjectSwitcherOpen] = useState(false);
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [aiPrefilledPrompt, setAiPrefilledPrompt] = useState<string>('');
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
+  const [storageSaveFailed, setStorageSaveFailed] = useState(false);
+
+  const isOnline = useOnlineStatus();
+
+  // Safely hydrate stored project (IndexedDB, migrating legacy localStorage data if present)
+  // and theme on client without SSR mismatch. useLayoutEffect + a microtask hop apply the
+  // hydrated state before the browser paints, avoiding a visible demo-data flash.
+  useLayoutEffect(() => {
+    queueMicrotask(async () => {
+      const stored = await loadOrMigrateInitialProject();
+      if (stored && stored.id) {
+        setProject(stored);
+      }
+      try {
+        const all = await getAllProjectsFromDB();
+        if (all && all.length > 0) {
+          setAllProjects(all);
+        } else if (stored && stored.id) {
+          setAllProjects([stored]);
+        }
+      } catch (e) {
+        console.error('Failed to load all projects from IndexedDB', e);
+      }
+      const savedTheme = localStorage.getItem('renovai_theme') as 'dark' | 'light' | null;
+      if (savedTheme) {
+        setTheme(savedTheme);
+        document.documentElement.classList.toggle('theme-light', savedTheme === 'light');
+      }
+    });
+  }, []);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('renovai_theme', next);
+      document.documentElement.classList.toggle('theme-light', next === 'light');
+      return next;
+    });
+  }, []);
+
+  // Save to storage helper
+  const updateProject = useCallback((newProject: RenovationProject) => {
+    setProject(newProject);
+    setAllProjects((prev) => {
+      const exists = prev.some((p) => p.id === newProject.id);
+      if (exists) {
+        return prev.map((p) => (p.id === newProject.id ? newProject : p));
+      }
+      return [...prev, newProject];
+    });
+    saveProjectToDB(newProject)
+      .then(() => setStorageSaveFailed(false))
+      .catch((e) => {
+        console.error('Failed to save project to IndexedDB', e);
+        setStorageSaveFailed(true);
+      });
+  }, []);
+
+  const handleSelectProject = useCallback((projectId: string) => {
+    const target = allProjects.find((p) => p.id === projectId);
+    if (target) {
+      setProject(target);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('renovai_active_project_id', target.id);
+      }
+    }
+  }, [allProjects]);
+
+  const handleCreateProject = useCallback(async (newProj: RenovationProject) => {
+    await saveProjectToDB(newProj);
+    setAllProjects((prev) => [...prev, newProj]);
+    setProject(newProj);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('renovai_active_project_id', newProj.id);
+    }
+  }, []);
+
+  const handleDuplicateProject = useCallback(async (sourceProj: RenovationProject) => {
+    const copy = duplicateProject(sourceProj);
+    await saveProjectToDB(copy);
+    setAllProjects((prev) => [...prev, copy]);
+    setProject(copy);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('renovai_active_project_id', copy.id);
+    }
+  }, []);
+
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    if (allProjects.length <= 1) return;
+    await deleteProjectFromDB(projectId);
+    const remaining = allProjects.filter((p) => p.id !== projectId);
+    setAllProjects(remaining);
+    if (project.id === projectId && remaining.length > 0) {
+      setProject(remaining[0]);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('renovai_active_project_id', remaining[0].id);
+      }
+    }
+  }, [allProjects, project.id]);
+
+  const currentRoom = project.rooms.find((r) => r.id === project.selectedRoomId) || project.rooms[0];
+
+  // Room selection handler
+  const handleSelectRoom = useCallback((roomId: string) => {
+    updateProject({
+      ...project,
+      selectedRoomId: roomId,
+    });
+  }, [project, updateProject]);
+
+  // Update room dimensions
+  const handleUpdateRoomDimensions = useCallback((roomId: string, width: number, length: number, height: number) => {
+    const area = width * length;
+    const perimeter = 2 * (width + length);
+    const room = project.rooms.find((r) => r.id === roomId);
+    const openingsArea = (room?.openings ?? []).reduce((sum, o) => sum + o.width * o.height, 0);
+    const wallArea = Math.max(0, perimeter * height - openingsArea);
+
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        width,
+        length,
+        height,
+        area,
+        perimeter,
+        wallArea,
+      };
+    });
+
+    updateProject({
+      ...project,
+      rooms: updatedRooms,
+    });
+  }, [project, updateProject]);
+
+  // Add furniture
+  const handleAddFurniture = useCallback((roomId: string, furniture: RoomFurniture) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        furniture: [...r.furniture, furniture],
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Update furniture collection (for drag-and-drop & rotation)
+  const handleUpdateFurniture = useCallback((roomId: string, furniture: RoomFurniture[]) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        furniture,
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Delete furniture
+  const handleDeleteFurniture = useCallback((roomId: string, furnitureId: string) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        furniture: r.furniture.filter((f) => f.id !== furnitureId),
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Add outlet
+  const handleAddOutlet = useCallback((roomId: string, outlet: RoomOutlet) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        outlets: [...r.outlets, outlet],
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Update design
+  const handleUpdateRoomDesign = useCallback((roomId: string, design: Room['design']) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return { ...r, design };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Update room photo (a local IndexedDB photo reference, see lib/db/usePhotoSrc.ts)
+  const handleUpdateRoomPhoto = useCallback((roomId: string, photoUrl: string) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return { ...r, photoUrl };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  // Expenses handlers
+  const handleAddExpense = useCallback((expense: Expense) => {
+    updateProject({
+      ...project,
+      expenses: [expense, ...project.expenses],
+    });
+  }, [project, updateProject]);
+
+  const handleDeleteExpense = useCallback((expenseId: string) => {
+    updateProject({
+      ...project,
+      expenses: project.expenses.filter((e) => e.id !== expenseId),
+    });
+  }, [project, updateProject]);
+
+  const handleToggleExpensePaid = useCallback((expenseId: string) => {
+    updateProject({
+      ...project,
+      expenses: project.expenses.map((e) => {
+        if (e.id !== expenseId) return e;
+        return { ...e, paid: !e.paid };
+      }),
+    });
+  }, [project, updateProject]);
+
+  const handleUpdateExpenseReceipt = useCallback((expenseId: string, photoId: string) => {
+    const updatedExpenses = project.expenses.map((exp) => {
+      if (exp.id !== expenseId) return exp;
+      return { ...exp, receiptPhotoId: photoId };
+    });
+    updateProject({ ...project, expenses: updatedExpenses });
+  }, [project, updateProject]);
+
+  const handleAddWorkLog = useCallback((entry: WorkLogEntry) => {
+    updateProject({
+      ...project,
+      workLogs: [entry, ...(project.workLogs || [])],
+    });
+  }, [project, updateProject]);
+
+  const handleDeleteWorkLog = useCallback((logId: string) => {
+    updateProject({
+      ...project,
+      workLogs: (project.workLogs || []).filter((l) => l.id !== logId),
+    });
+  }, [project, updateProject]);
+
+  // Materials handlers
+  const handleToggleMaterialPurchased = useCallback((materialId: string) => {
+    updateProject({
+      ...project,
+      materials: project.materials.map((m) => {
+        if (m.id !== materialId) return m;
+        return { ...m, purchased: !m.purchased };
+      }),
+    });
+  }, [project, updateProject]);
+
+  const handleAddMaterial = useCallback((material: MaterialCalculation) => {
+    updateProject({
+      ...project,
+      materials: [...project.materials, material],
+    });
+  }, [project, updateProject]);
+
+  // Schedule & Tasks handlers
+  const handleUpdateStageProgress = useCallback((stageId: string, progress: number) => {
+    updateProject({
+      ...project,
+      stages: project.stages.map((s) => {
+        if (s.id !== stageId) return s;
+        const status = progress === 100 ? 'done' : progress > 0 ? 'in_progress' : s.status;
+        return { ...s, progressPercent: progress, status };
+      }),
+    });
+  }, [project, updateProject]);
+
+  const handleToggleTaskComplete = useCallback((stageId: string, taskId: string) => {
+    updateProject({
+      ...project,
+      stages: project.stages.map((s) => {
+        if (s.id !== stageId) return s;
+        return {
+          ...s,
+          tasks: s.tasks.map((t) => {
+            if (t.id !== taskId) return t;
+            return { ...t, completed: !t.completed };
+          }),
+        };
+      }),
+    });
+  }, [project, updateProject]);
+
+  // Notifications handlers
+  const handleAddNotification = useCallback((notification: NotificationItem) => {
+    updateProject({
+      ...project,
+      notifications: [notification, ...project.notifications],
+    });
+  }, [project, updateProject]);
+
+  const handleDismissNotification = useCallback((notificationId: string) => {
+    updateProject({
+      ...project,
+      notifications: project.notifications.filter((n) => n.id !== notificationId),
+    });
+  }, [project, updateProject]);
+
+  // QA Checklists
+  const handleUpdateQAStatus = useCallback((qaId: string, status: QAChecklistItem['status']) => {
+    updateProject({
+      ...project,
+      qaChecklist: project.qaChecklist.map((q) => {
+        if (q.id !== qaId) return q;
+        return { ...q, status };
+      }),
+    });
+  }, [project, updateProject]);
+
+  // Room Work Stages Handlers for Progress Tracking
+  const handleUpdateRoomStages = useCallback((roomId: string, stages: RoomWorkStage[]) => {
+    const isCompleted = stages.length > 0 && stages.every((s) => s.completed || s.status === 'done');
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        workStages: stages,
+        isCompleted,
+      };
+    });
+    updateProject({
+      ...project,
+      rooms: updatedRooms,
+    });
+  }, [project, updateProject]);
+
+  const handleToggleRoomCompleted = useCallback((roomId: string, completed: boolean) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      const currentStages = getRoomWorkStages(r);
+      const updatedStages = currentStages.map((st) => ({
+        ...st,
+        completed,
+        status: (completed ? 'done' : 'in_progress') as StageStatus,
+        completedAt: completed ? (st.completedAt || new Date().toISOString().slice(0, 10)) : undefined,
+      }));
+      return {
+        ...r,
+        isCompleted: completed,
+        workStages: updatedStages,
+      };
+    });
+    updateProject({
+      ...project,
+      rooms: updatedRooms,
+    });
+  }, [project, updateProject]);
+
+  const handleQuickToggleStage = useCallback((roomId: string, stageId: string) => {
+    const targetRoom = project.rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+    const stages = getRoomWorkStages(targetRoom);
+    const updatedStages = stages.map((st) => {
+      if (st.id !== stageId) return st;
+      const willBeCompleted = !st.completed;
+      return {
+        ...st,
+        completed: willBeCompleted,
+        status: (willBeCompleted ? 'done' : 'in_progress') as StageStatus,
+        completedAt: willBeCompleted ? new Date().toISOString().slice(0, 10) : undefined,
+      };
+    });
+    handleUpdateRoomStages(roomId, updatedStages);
+  }, [project, handleUpdateRoomStages]);
+
+  // Add Room
+  const handleAddRoom = useCallback((newRoom: Room) => {
+    updateProject({
+      ...project,
+      rooms: [...project.rooms, newRoom],
+      selectedRoomId: newRoom.id,
+    });
+  }, [project, updateProject]);
+
+  // Step Switch routing logic
+  const renderStepContent = () => {
+    switch (activePipelineStep) {
+      case 'measure':
+        return (
+          <ViewRoomScanMeasure
+            room={currentRoom}
+            onUpdateRoomDimensions={handleUpdateRoomDimensions}
+            onAddFurniture={handleAddFurniture}
+            onUpdateFurniture={handleUpdateFurniture}
+            onDeleteFurniture={handleDeleteFurniture}
+            onAddOutlet={handleAddOutlet}
+            onUpdateRoomDesign={handleUpdateRoomDesign}
+            onUpdateRoomPhoto={handleUpdateRoomPhoto}
+            onNavigateToStep={(s) => setActivePipelineStep(s as RenovationPipelineStep)}
+          />
+        );
+
+
+      case 'design':
+        return (
+          <ViewDesignMaterials
+            room={currentRoom}
+            materials={project.materials}
+            onToggleMaterialPurchased={handleToggleMaterialPurchased}
+            onAddMaterial={handleAddMaterial}
+            onUpdateRoomDesign={handleUpdateRoomDesign}
+            onUpdateFurniture={handleUpdateFurniture}
+            onConsultAI={(prompt) => {
+              setAiPrefilledPrompt(prompt);
+              setIsAIModalOpen(true);
+            }}
+          />
+        );
+
+      case 'cost':
+        return (
+          <ViewBudgetExpenses
+            project={project}
+            onAddExpense={handleAddExpense}
+            onDeleteExpense={handleDeleteExpense}
+            onToggleExpensePaid={handleToggleExpensePaid}
+            onOpenAddModal={() => setIsExpenseModalOpen(true)}
+            onOpenReportModal={() => setIsReportModalOpen(true)}
+            onUpdateExpenseReceipt={handleUpdateExpenseReceipt}
+          />
+        );
+
+      case 'plan':
+        return (
+          <ViewScheduleTimeline
+            project={project}
+            onUpdateStageProgress={handleUpdateStageProgress}
+            onToggleTaskComplete={handleToggleTaskComplete}
+            onAddNotification={handleAddNotification}
+            onDismissNotification={handleDismissNotification}
+          />
+        );
+
+      case 'progress':
+        return (
+          <ViewRenovationProgress
+            rooms={project.rooms}
+            selectedRoomId={project.selectedRoomId}
+            workLogs={project.workLogs}
+            onSelectRoom={handleSelectRoom}
+            onUpdateRoomStages={handleUpdateRoomStages}
+            onToggleRoomCompleted={handleToggleRoomCompleted}
+            onAddWorkLog={handleAddWorkLog}
+            onDeleteWorkLog={handleDeleteWorkLog}
+            onConsultAI={(prompt) => {
+              setAiPrefilledPrompt(prompt);
+              setIsAIModalOpen(true);
+            }}
+            onNavigateToStep={(s) => setActivePipelineStep(s as RenovationPipelineStep)}
+          />
+        );
+
+      case 'qa':
+        return (
+          <ViewProgressQA
+            room={currentRoom}
+            qaItems={project.qaChecklist}
+            onUpdateQAStatus={handleUpdateQAStatus}
+            onAddQACheck={(item) => {
+              updateProject({
+                ...project,
+                qaChecklist: [...project.qaChecklist, item],
+              });
+            }}
+          />
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`min-h-screen flex flex-col selection:bg-teal-500/30 transition-colors duration-200 ${
+      theme === 'light' ? 'theme-light bg-slate-100 text-slate-900' : 'bg-slate-950 text-slate-100'
+    }`}>
+      
+      {/* Offline Status Warning Bar if offline */}
+      <OfflineIndicator />
+
+      {/* Storage Save Failure Warning Bar */}
+      {storageSaveFailed && (
+        <div className="flex items-center justify-between gap-3 bg-rose-600 px-4 py-2 text-xs font-semibold text-white">
+          <span>Nie udało się zapisać zmian lokalnie (brak miejsca w pamięci przeglądarki). Wyeksportuj projekt jako kopię zapasową.</span>
+          <button
+            onClick={() => setStorageSaveFailed(false)}
+            className="rounded-md bg-rose-800/60 px-2 py-1 hover:bg-rose-800"
+          >
+            Zamknij
+          </button>
+        </div>
+      )}
+
+      {/* Main Top App Header */}
+      <Header
+        project={project}
+        projectsCount={allProjects.length || 1}
+        isOnline={isOnline}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onSelectRoom={handleSelectRoom}
+        onOpenAddExpense={() => setIsExpenseModalOpen(true)}
+        onOpenNotifications={() => setActivePipelineStep('plan')}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenAddRoomModal={() => setIsAddRoomModalOpen(true)}
+        onOpenReportModal={() => setIsReportModalOpen(true)}
+        onOpenProjectSwitcher={() => setIsProjectSwitcherOpen(true)}
+        unreadNotificationsCount={project.notifications.filter((n) => !n.read).length}
+      />
+
+      {/* 12-Step Renovation Pipeline Navigator */}
+      <WorkflowPipeline
+        activeStep={activePipelineStep}
+        onSelectStep={(step) => setActivePipelineStep(step)}
+      />
+
+      {/* Core Dynamic Content Area with Step Transitions */}
+      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Visual Renovation Progress Indicator Banner on Main Screen */}
+        {activePipelineStep !== 'progress' && (
+          <ProjectProgressIndicator
+            rooms={project.rooms}
+            selectedRoomId={project.selectedRoomId}
+            onSelectRoom={handleSelectRoom}
+            onOpenProgressPage={() => setActivePipelineStep('progress')}
+            onToggleStage={handleQuickToggleStage}
+          />
+        )}
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activePipelineStep}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            {renderStepContent()}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
+        <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>
+            <strong>Renowacje u Kaczaka</strong> • Lokalny, privacy-first asystent projektowania i remontu mieszkania
+          </span>
+          <span className="font-mono text-[11px] text-slate-600">
+            Wszystkie dane szyfrowane lokalnie (Web Crypto API) • Offline Ready PWA
+          </span>
+        </div>
+      </footer>
+
+      {/* Floating Action Button for AI Engineering Assistant with Draggable Handle & Quick Actions */}
+      <FloatingAIAssistant
+        currentRoom={currentRoom}
+        currentStep={activePipelineStep}
+        onOpenFullModal={(prompt) => {
+          if (prompt) setAiPrefilledPrompt(prompt);
+          setIsAIModalOpen(true);
+        }}
+      />
+
+      {/* Modals */}
+      <AddExpenseModal
+        isOpen={isExpenseModalOpen}
+        onClose={() => setIsExpenseModalOpen(false)}
+        onAddExpense={handleAddExpense}
+        rooms={project.rooms}
+        currentRoomId={project.selectedRoomId}
+      />
+
+      <AIExpertModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        currentRoom={currentRoom}
+        currentStep={activePipelineStep}
+        initialPrompt={aiPrefilledPrompt}
+      />
+
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        project={project}
+        onRestoreProject={(p) => updateProject(p)}
+      />
+
+      <AddRoomModal
+        isOpen={isAddRoomModalOpen}
+        onClose={() => setIsAddRoomModalOpen(false)}
+        onAddRoom={handleAddRoom}
+      />
+
+      <ReportGeneratorModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        project={project}
+      />
+
+      <ProjectSwitcherModal
+        isOpen={isProjectSwitcherOpen}
+        onClose={() => setIsProjectSwitcherOpen(false)}
+        currentProject={project}
+        projects={allProjects.length > 0 ? allProjects : [project]}
+        onSelectProject={(id) => {
+          handleSelectProject(id);
+          setIsProjectSwitcherOpen(false);
+        }}
+        onCreateProject={(newProj) => {
+          handleCreateProject(newProj);
+          setIsProjectSwitcherOpen(false);
+        }}
+        onDuplicateProject={(sourceProj) => {
+          handleDuplicateProject(sourceProj);
+          setIsProjectSwitcherOpen(false);
+        }}
+        onDeleteProject={handleDeleteProject}
+      />
+
+    </div>
+  );
+}
