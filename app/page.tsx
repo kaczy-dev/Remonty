@@ -69,12 +69,16 @@ export default function HomePage() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [storageSaveFailed, setStorageSaveFailed] = useState(false);
-  const [pushPermissionState, setPushPermissionState] = useState<string>(
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
-  );
+  const [pushPermissionState, setPushPermissionState] = useState<string>('default');
 
   const { showToast } = useToast();
   const isOnline = useOnlineStatus();
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPushPermissionState(Notification.permission);
+    }
+  }, []);
 
   // Safely hydrate stored project (IndexedDB, migrating legacy localStorage data if present)
   // and theme on client without SSR mismatch. useLayoutEffect + a microtask hop apply the

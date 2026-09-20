@@ -48,9 +48,13 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
   const [newNotifMsg, setNewNotifMsg] = useState('');
   const [newNotifPriority, setNewNotifPriority] = useState<NotificationItem['priority']>('medium');
   const [showAddNotifModal, setShowAddNotifModal] = useState(false);
-  const [notifPermissionState, setNotifPermissionState] = useState<string>(
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
-  );
+  const [notifPermissionState, setNotifPermissionState] = useState<string>('default');
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermissionState(Notification.permission);
+    }
+  }, []);
 
   const selectedStage = project.stages.find((s) => s.id === selectedStageId) || project.stages[0];
 
