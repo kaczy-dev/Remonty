@@ -52,7 +52,13 @@ import {
   SplitSquareVertical,
   Wrench,
   Paintbrush,
-  Box
+  Box,
+  Crosshair,
+  Grid,
+  SunMedium,
+  Calculator,
+  CheckCircle2,
+  HelpCircle
 } from 'lucide-react';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX, savePhotoBlob } from '@/lib/db';
 import { compressImage } from '@/lib/image-compressor';
@@ -293,6 +299,24 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   const [quickRemodelTab, setQuickRemodelTab] = useState<'floors' | 'walls' | 'furniture' | 'light'>('floors');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Perspective Calibration & Camera Match state
+  const [showPerspectiveMatch, setShowPerspectiveMatch] = useState<boolean>(false);
+  const [showVanishingGrid, setShowVanishingGrid] = useState<boolean>(false);
+  const [cameraFov, setCameraFov] = useState<number>(60);
+  const [cameraHeightVal, setCameraHeightVal] = useState<number>(1.55);
+  const [cameraPitchVal, setCameraPitchVal] = useState<number>(-12);
+  const [cameraYawVal, setCameraYawVal] = useState<number>(0);
+  const [cameraDistVal, setCameraDistVal] = useState<number>(() => Math.max(room.width, room.length) * 1.15);
+
+  // AR Overlay Mode: 'full_floor' (nowa posadzka) vs 'furniture_shadows_only' (oryginalna podłoga ze zdjęcia + cienie mebli)
+  const [overlayFloorMode, setOverlayFloorMode] = useState<'full_floor' | 'furniture_shadows_only'>('full_floor');
+
+  // Sun Light Direction to match real room windows
+  const [windowLightDirection, setWindowLightDirection] = useState<'left' | 'center' | 'right' | 'front'>('right');
+
+  // Floor BOM / Cost Estimate HUD
+  const [showFloorBomHud, setShowFloorBomHud] = useState<boolean>(false);
+
   const resolvedPhotoSrc = usePhotoSrc(room.photoUrl);
 
   // Photo Upload Handler with Client-Side WebP Compression & IndexedDB Storage
@@ -397,6 +421,79 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       ...room.design,
       lightingTempK: tempK,
     });
+  };
+
+  // Camera Perspective Calibration & Match functions
+  const applyCameraPerspective = useCallback((
+    fov: number,
+    height: number,
+    pitchDeg: number,
+    yawDeg: number,
+    distM?: number
+  ) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+
+    const distance = distM !== undefined ? distM : Math.max(room.width, room.length) * 1.15;
+    const radYaw = THREE.MathUtils.degToRad(yawDeg);
+    const radPitch = THREE.MathUtils.degToRad(pitchDeg);
+
+    const posX = Math.sin(radYaw) * distance;
+    const posZ = Math.cos(radYaw) * distance;
+    const posY = Math.max(0.35, height);
+
+    const targetX = 0;
+    const targetY = Math.max(0.05, posY + Math.tan(radPitch) * (distance * 0.7));
+    const targetZ = 0;
+
+    camera.position.set(posX, posY, posZ);
+    controls.target.set(targetX, targetY, targetZ);
+    controls.update();
+  }, [room.width, room.length]);
+
+  const handleApplyPerspectivePreset = (preset: 'eye_standing' | 'sitting_couch' | 'wide_corner' | 'front_door') => {
+    let fov = 60;
+    let height = 1.55;
+    let pitch = -12;
+    let yaw = 0;
+    let dist = Math.max(room.width, room.length) * 1.15;
+
+    if (preset === 'eye_standing') {
+      fov = 65;
+      height = 1.55;
+      pitch = -12;
+      yaw = 0;
+      dist = Math.max(room.width, room.length) * 1.1;
+    } else if (preset === 'sitting_couch') {
+      fov = 60;
+      height = 1.10;
+      pitch = -8;
+      yaw = 15;
+      dist = Math.max(room.width, room.length) * 0.95;
+    } else if (preset === 'wide_corner') {
+      fov = 82;
+      height = 1.50;
+      pitch = -15;
+      yaw = 42;
+      dist = Math.max(room.width, room.length) * 1.25;
+    } else if (preset === 'front_door') {
+      fov = 68;
+      height = 1.60;
+      pitch = -10;
+      yaw = 0;
+      dist = Math.max(room.width, room.length) * 1.3;
+    }
+
+    setCameraFov(fov);
+    setCameraHeightVal(height);
+    setCameraPitchVal(pitch);
+    setCameraYawVal(yaw);
+    setCameraDistVal(dist);
+    applyCameraPerspective(fov, height, pitch, yaw, dist);
   };
 
   // Smooth camera transition ref
@@ -850,22 +947,39 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const h = roomH;
     const lightColorHex = kelvinToHex(lightingTempK);
 
+    // Calculate sun position based on real room window direction
+    let sunX = w * 1.8;
+    let sunZ = l * 1.2;
+    if (windowLightDirection === 'left') {
+      sunX = -w * 2.2;
+      sunZ = l * 0.4;
+    } else if (windowLightDirection === 'right') {
+      sunX = w * 2.2;
+      sunZ = l * 0.4;
+    } else if (windowLightDirection === 'center') {
+      sunX = 0;
+      sunZ = -l * 2.2;
+    } else if (windowLightDirection === 'front') {
+      sunX = 0;
+      sunZ = l * 2.2;
+    }
+
     if (lightingPreset === 'day') {
       // Natural Daylight
       const ambientLight = new THREE.AmbientLight('#dbeafe', 0.65);
       lightsGroup.add(ambientLight);
 
       // Sun Directional Light through window
-      const sun = new THREE.DirectionalLight('#fffbeb', 1.8);
-      sun.position.set(w * 1.5, h * 1.8, l * 1.2);
+      const sun = new THREE.DirectionalLight('#fffbeb', 1.85);
+      sun.position.set(sunX, h * 1.85, sunZ);
       sun.castShadow = true;
       sun.shadow.mapSize.width = 2048;
       sun.shadow.mapSize.height = 2048;
       sun.shadow.camera.near = 0.5;
       sun.shadow.camera.far = 40;
-      sun.shadow.camera.left = -w * 1.8;
-      sun.shadow.camera.right = w * 1.8;
-      sun.shadow.camera.top = h * 2.2;
+      sun.shadow.camera.left = -Math.max(w, l) * 2;
+      sun.shadow.camera.right = Math.max(w, l) * 2;
+      sun.shadow.camera.top = h * 2.5;
       sun.shadow.camera.bottom = -1;
       sun.shadow.bias = -0.0005;
       sun.shadow.radius = 2.5;
@@ -881,7 +995,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       lightsGroup.add(ambientLight);
 
       const sunsetSun = new THREE.DirectionalLight('#fb923c', 2.2);
-      sunsetSun.position.set(w * 2, h * 0.8, l * 1.8);
+      sunsetSun.position.set(sunX * 1.1, h * 0.85, sunZ * 1.1);
       sunsetSun.castShadow = true;
       sunsetSun.shadow.mapSize.width = 2048;
       sunsetSun.shadow.mapSize.height = 2048;
@@ -919,7 +1033,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       floorLamp.position.set(-w * 0.38, 1.2, -l * 0.35);
       lightsGroup.add(floorLamp);
     }
-  }, [lightingPreset, roomW, roomL, roomH, lightingTempK]);
+  }, [lightingPreset, roomW, roomL, roomH, lightingTempK, windowLightDirection]);
 
   // Rebuild 3D Room Geometry & Furnishings
   useEffect(() => {
@@ -967,7 +1081,23 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const floorMesh = new THREE.Mesh(floorGeo, floorMat);
     floorMesh.position.set(0, -0.04, 0);
     floorMesh.receiveShadow = true;
+    floorMesh.name = 'room-floor-mesh';
+    if (overlayFloorMode === 'furniture_shadows_only' && photoDisplayMode === 'photo_overlay') {
+      floorMesh.visible = false;
+    }
     roomGroup.add(floorMesh);
+
+    // --- 1b. AR SHADOW CATCHER PLANE ---
+    // Invisible plane using THREE.ShadowMaterial that intercepts soft contact shadows from 3D furniture
+    // grounding them directly onto the user's real room photo
+    const shadowCatcherGeo = new THREE.PlaneGeometry(W * 1.4, L * 1.4);
+    const shadowCatcherMat = new THREE.ShadowMaterial({ opacity: 0.52 });
+    const shadowCatcherMesh = new THREE.Mesh(shadowCatcherGeo, shadowCatcherMat);
+    shadowCatcherMesh.rotation.x = -Math.PI / 2;
+    shadowCatcherMesh.position.set(0, 0.002, 0);
+    shadowCatcherMesh.receiveShadow = true;
+    shadowCatcherMesh.name = 'ar-shadow-catcher';
+    roomGroup.add(shadowCatcherMesh);
 
     // --- 2. BASEBOARDS (Listwy przypodłogowe 8cm) ---
     const baseboardH = 0.08;
@@ -1471,7 +1601,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     artGroup.position.set(0, 1.7, -halfL + 0.02);
     roomGroup.add(artGroup);
 
-  }, [room, showCeiling, cutawayWalls, photoDisplayMode, resolvedPhotoSrc]);
+  }, [room, showCeiling, cutawayWalls, photoDisplayMode, resolvedPhotoSrc, overlayFloorMode]);
 
   // Update selection highlight ring and bracket when selectedFurnitureId or room.furniture changes
   useEffect(() => {
@@ -1574,7 +1704,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     setSelectedFurnitureId(null);
   };
 
-  // High-Resolution Snapshot Capture
+  // High-Resolution Snapshot Capture (compositing real photo + 3D canvas if AR overlay is active)
   const handleCaptureSnapshot = () => {
     const renderer = rendererRef.current;
     const scene = sceneRef.current;
@@ -1586,9 +1716,65 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
 
     setTimeout(() => {
       try {
-        const dataUrl = renderer.domElement.toDataURL('image/png');
+        const domCanvas = renderer.domElement;
+        
+        if (resolvedPhotoSrc && (photoDisplayMode === 'photo_overlay' || photoDisplayMode === 'split_compare')) {
+          const compCanvas = document.createElement('canvas');
+          compCanvas.width = domCanvas.width;
+          compCanvas.height = domCanvas.height;
+          const ctx = compCanvas.getContext('2d');
+          if (ctx) {
+            const bgImg = new Image();
+            bgImg.crossOrigin = 'anonymous';
+            bgImg.onload = () => {
+              // Draw background photo scaled to cover
+              ctx.drawImage(bgImg, 0, 0, compCanvas.width, compCanvas.height);
+              
+              if (photoDisplayMode === 'photo_overlay') {
+                ctx.globalAlpha = photoBlendOpacity / 100;
+                ctx.drawImage(domCanvas, 0, 0);
+              } else if (photoDisplayMode === 'split_compare') {
+                const splitPx = (splitSliderPos / 100) * compCanvas.width;
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(splitPx, 0, compCanvas.width - splitPx, compCanvas.height);
+                ctx.clip();
+                ctx.drawImage(domCanvas, 0, 0);
+                ctx.restore();
+                
+                // Draw split line
+                ctx.strokeStyle = '#2dd4bf';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(splitPx, 0);
+                ctx.lineTo(splitPx, compCanvas.height);
+                ctx.stroke();
+              }
+              
+              const dataUrl = compCanvas.toDataURL('image/png');
+              const link = document.createElement('a');
+              link.download = `Renowacja-AR-${room.name.replace(/\s+/g, '_')}-${Date.now()}.png`;
+              link.href = dataUrl;
+              link.click();
+              setIsExporting(false);
+            };
+            bgImg.onerror = () => {
+              // Fallback to domCanvas directly
+              const dataUrl = domCanvas.toDataURL('image/png');
+              const link = document.createElement('a');
+              link.download = `Renowacja-3D-${room.name.replace(/\s+/g, '_')}-${Date.now()}.png`;
+              link.href = dataUrl;
+              link.click();
+              setIsExporting(false);
+            };
+            bgImg.src = resolvedPhotoSrc;
+            return;
+          }
+        }
+
+        const dataUrl = domCanvas.toDataURL('image/png');
         const link = document.createElement('a');
-        link.download = `Kaczaka-3D-${room.name.replace(/\s+/g, '_')}-${Date.now()}.png`;
+        link.download = `Renowacja-3D-${room.name.replace(/\s+/g, '_')}-${Date.now()}.png`;
         link.href = dataUrl;
         link.click();
       } catch (err) {
@@ -1657,15 +1843,101 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
         </div>
       )}
 
-      {/* Opacity Blend Slider for 'photo_overlay' */}
+      {/* Perspective Vanishing Lines & Horizon Guide Overlay */}
+      {showVanishingGrid && (
+        <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
+          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="vanishing-pattern" width="48" height="48" patternUnits="userSpaceOnUse">
+                <path d="M 48 0 L 0 0 0 48" fill="none" stroke="rgba(45, 212, 191, 0.12)" strokeWidth="1" />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#vanishing-pattern)" />
+            
+            {/* Horizon Guide Line (Linia Horyzontu) */}
+            <line 
+              x1="0" 
+              y1={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              x2="100%" 
+              y2={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              stroke="#f59e0b" 
+              strokeWidth="2" 
+              strokeDasharray="8 4" 
+              opacity="0.9" 
+            />
+            
+            {/* Vanishing Lines converging from floor bottom to horizon vanishing point */}
+            <line 
+              x1="50%" 
+              y1={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              x2="0%" 
+              y2="100%" 
+              stroke="#14b8a6" 
+              strokeWidth="2" 
+              strokeDasharray="6 4" 
+              opacity="0.8" 
+            />
+            <line 
+              x1="50%" 
+              y1={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              x2="100%" 
+              y2="100%" 
+              stroke="#14b8a6" 
+              strokeWidth="2" 
+              strokeDasharray="6 4" 
+              opacity="0.8" 
+            />
+            <line 
+              x1="50%" 
+              y1={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              x2="25%" 
+              y2="100%" 
+              stroke="#06b6d4" 
+              strokeWidth="1.5" 
+              strokeDasharray="4 4" 
+              opacity="0.65" 
+            />
+            <line 
+              x1="50%" 
+              y1={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              x2="75%" 
+              y2="100%" 
+              stroke="#06b6d4" 
+              strokeWidth="1.5" 
+              strokeDasharray="4 4" 
+              opacity="0.65" 
+            />
+
+            {/* Vanishing Center Point */}
+            <circle 
+              cx="50%" 
+              cy={`${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}%`} 
+              r="6" 
+              fill="#f59e0b" 
+              stroke="#ffffff"
+              strokeWidth="2"
+            />
+          </svg>
+          <div 
+            className="absolute right-4 text-[10px] font-mono text-amber-300 bg-amber-950/90 border border-amber-500/50 px-2.5 py-1 rounded-lg shadow-lg flex items-center gap-1.5"
+            style={{ top: `calc(${Math.max(15, Math.min(85, 50 - (cameraPitchVal * 1.3)))}% - 14px)` }}
+          >
+            <span>Horyzont wzroku: {cameraHeightVal.toFixed(2)}m</span>
+            <span className="text-amber-500 font-bold">• Pochylenie: {cameraPitchVal}°</span>
+          </div>
+        </div>
+      )}
+
+      {/* Opacity Blend & AR Overlay Controls for 'photo_overlay' */}
       {photoDisplayMode === 'photo_overlay' && resolvedPhotoSrc && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-3 rounded-2xl border border-teal-500/50 bg-slate-950/95 px-4 py-2 text-xs shadow-2xl backdrop-blur-xl">
-          <span className="font-semibold text-slate-300 whitespace-nowrap flex items-center gap-1.5">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-teal-400" />
-            <span>Przenikanie projektu:</span>
-          </span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-400 font-mono">Zdjęcie</span>
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex flex-wrap items-center justify-center gap-2.5 rounded-2xl border border-teal-500/50 bg-slate-950/95 p-2 px-3.5 shadow-2xl backdrop-blur-xl">
+          {/* Opacity Slider */}
+          <div className="flex items-center gap-2 pr-2 border-r border-slate-800">
+            <span className="font-semibold text-slate-300 whitespace-nowrap flex items-center gap-1.5 text-xs">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-teal-400" />
+              <span className="hidden sm:inline">Przenikanie:</span>
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono">Foto</span>
             <input
               type="range"
               min="10"
@@ -1673,10 +1945,50 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
               step="1"
               value={photoBlendOpacity}
               onChange={(e) => setPhotoBlendOpacity(parseInt(e.target.value, 10))}
-              className="w-28 sm:w-40 accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+              className="w-20 sm:w-32 accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
             />
             <span className="text-[10px] text-teal-300 font-mono font-bold w-9">{photoBlendOpacity}%</span>
           </div>
+
+          {/* Selective Floor Mode Switcher */}
+          <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-0.5 rounded-xl text-xs">
+            <button
+              onClick={() => setOverlayFloorMode('full_floor')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                overlayFloorMode === 'full_floor'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Pokazuje nową posadzkę 3D nałożoną na zdjęcie"
+            >
+              Nowa Posadzka
+            </button>
+            <button
+              onClick={() => setOverlayFloorMode('furniture_shadows_only')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                overlayFloorMode === 'furniture_shadows_only'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Ukrywa posadzkę 3D — widzisz swoją realną podłogę ze zdjęcia, a nowe meble rzucają na nią realistyczne cienie!"
+            >
+              Tylko Meble + Cienie
+            </button>
+          </div>
+
+          {/* Perspective Calibration Toggle */}
+          <button
+            onClick={() => setShowPerspectiveMatch(!showPerspectiveMatch)}
+            className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold transition ${
+              showPerspectiveMatch
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Dopasuj wysokość kamery, kąt FOV i perspektywę do Twojego zdjęcia"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">Kalibracja</span>
+          </button>
         </div>
       )}
 
@@ -1899,7 +2211,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
           {/* Quick Remodel Toggle Button */}
           <button
             onClick={() => setShowQuickRemodel(!showQuickRemodel)}
-            className={`flex items-center gap-1.5 rounded-2xl border px-3.5 py-2 text-xs font-bold backdrop-blur-md shadow-lg transition active:scale-95 ${
+            className={`flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-bold backdrop-blur-md shadow-lg transition active:scale-95 ${
               showQuickRemodel
                 ? 'border-amber-400 bg-amber-500/20 text-amber-300'
                 : 'border-slate-700/80 bg-slate-900/90 text-slate-200 hover:text-white hover:bg-slate-800'
@@ -1908,6 +2220,34 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span className="hidden sm:inline">Szybki Remont</span>
+          </button>
+
+          {/* Perspective Match Calibration Button */}
+          <button
+            onClick={() => setShowPerspectiveMatch(!showPerspectiveMatch)}
+            className={`flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-bold backdrop-blur-md shadow-lg transition active:scale-95 ${
+              showPerspectiveMatch
+                ? 'border-teal-400 bg-teal-500/20 text-teal-300'
+                : 'border-slate-700/80 bg-slate-900/90 text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Dopasuj wysokość kamery, kąt widzenia i perspektywę do Twojego zdjęcia pokoju"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-teal-400" />
+            <span className="hidden sm:inline">Perspektywa</span>
+          </button>
+
+          {/* Floor BOM HUD Button */}
+          <button
+            onClick={() => setShowFloorBomHud(!showFloorBomHud)}
+            className={`flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-bold backdrop-blur-md shadow-lg transition active:scale-95 ${
+              showFloorBomHud
+                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
+                : 'border-slate-700/80 bg-slate-900/90 text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Przedmiar, naddatek ITB 10% i kosztorys posadzki"
+          >
+            <Calculator className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Kosztorys</span>
           </button>
         </div>
 
@@ -2051,33 +2391,68 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
 
           {/* Tab 1: Posadzka */}
           {quickRemodelTab === 'floors' && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-              {FLOOR_PRESETS.map((p) => {
-                const isSelected = room.design.floorTexture === p.floorTexture || room.design.floorType === p.floorType;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => handleSelectFloorPreset(p)}
-                    className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
-                      isSelected
-                        ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
-                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
-                    }`}
-                  >
-                    <div
-                      className="w-10 h-10 rounded-xl border border-white/20 mb-2 shadow-inner"
-                      style={{ backgroundColor: p.previewColor }}
-                    />
-                    <span className="text-xs font-bold text-white leading-tight">{p.name}</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5">{p.desc}</span>
-                    {isSelected && (
-                      <span className="mt-1 flex items-center gap-1 text-[10px] text-teal-400 font-semibold">
-                        <Check className="w-3 h-3" /> Aktywna
+            <div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                {FLOOR_PRESETS.map((p) => {
+                  const isSelected = room.design.floorTexture === p.floorTexture || room.design.floorType === p.floorType;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleSelectFloorPreset(p)}
+                      className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
+                        isSelected
+                          ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
+                          : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-xl border border-white/20 mb-2 shadow-inner"
+                        style={{ backgroundColor: p.previewColor }}
+                      />
+                      <span className="text-xs font-bold text-white leading-tight">{p.name}</span>
+                      <span className="text-[10px] text-slate-400 mt-0.5">{p.desc}</span>
+                      {isSelected && (
+                        <span className="mt-1 flex items-center gap-1 text-[10px] text-teal-400 font-semibold">
+                          <Check className="w-3 h-3" /> Aktywna
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Instant Floor-to-BOM HUD widget */}
+              <div className="mt-3 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center justify-center shrink-0">
+                    <Calculator className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <span>Przedmiar & Kosztorys Posadzki</span>
+                      <span className="text-[10px] text-teal-300 bg-teal-950 border border-teal-800/80 px-1.5 py-0.5 rounded font-mono">
+                        Norma ITB: +10% zapas na docinki
                       </span>
-                    )}
-                  </button>
-                );
-              })}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2">
+                      <span>Powierzchnia netto: <strong className="text-slate-200 font-mono">{(room.width * room.length).toFixed(2)} m²</strong></span>
+                      <span>•</span>
+                      <span>Zapas 10%: <strong className="text-teal-300 font-mono">{(room.width * room.length * 1.10).toFixed(2)} m²</strong></span>
+                      <span>•</span>
+                      <span>Opakowania: <strong className="text-white font-mono">{Math.ceil((room.width * room.length * 1.10) / 2.22)} paczek</strong> (~2.22 m²/op.)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Szacowany koszt materiału</div>
+                    <div className="text-sm font-bold text-teal-300 font-mono">
+                      ~{Math.round(room.width * room.length * 1.10 * 129).toLocaleString('pl-PL')} PLN
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2137,38 +2512,301 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
 
           {/* Tab 4: Światło */}
           {quickRemodelTab === 'light' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { k: 2700, name: 'Ciepłe Przytulne (2700K)', desc: 'Idealne do salonu i sypialni, relaksująca złota barwa' },
-                { k: 4000, name: 'Neutralne Dzienne (4000K)', desc: 'Standard do pracy, kuchni i łazienki, naturalne oddawanie barw' },
-                { k: 6000, name: 'Chłodne Nowoczesne (6000K)', desc: 'Loftowy, nowoczesny styl, mocny kontrast detali' },
-              ].map((lt) => {
-                const isSelected = (room.design.lightingTempK || 4000) === lt.k;
-                return (
-                  <button
-                    key={lt.k}
-                    onClick={() => handleSelectLightTemp(lt.k)}
-                    className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left transition active:scale-95 ${
-                      isSelected
-                        ? 'border-amber-400 bg-amber-950/40 ring-2 ring-amber-400/30'
-                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
-                      <Lightbulb className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white flex items-center gap-2">
-                        <span>{lt.name}</span>
-                        {isSelected && <span className="text-amber-400 text-[10px] font-mono">● Aktywne</span>}
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { k: 2700, name: 'Ciepłe Przytulne (2700K)', desc: 'Idealne do salonu i sypialni, relaksująca złota barwa' },
+                  { k: 4000, name: 'Neutralne Dzienne (4000K)', desc: 'Standard do pracy, kuchni i łazienki, naturalne oddawanie barw' },
+                  { k: 6000, name: 'Chłodne Nowoczesne (6000K)', desc: 'Loftowy, nowoczesny styl, mocny kontrast detali' },
+                ].map((lt) => {
+                  const isSelected = (room.design.lightingTempK || 4000) === lt.k;
+                  return (
+                    <button
+                      key={lt.k}
+                      onClick={() => handleSelectLightTemp(lt.k)}
+                      className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left transition active:scale-95 ${
+                        isSelected
+                          ? 'border-amber-400 bg-amber-950/40 ring-2 ring-amber-400/30'
+                          : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                        <Lightbulb className="w-4 h-4" />
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{lt.desc}</p>
-                    </div>
-                  </button>
-                );
-              })}
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>{lt.name}</span>
+                          {isSelected && <span className="text-amber-400 text-[10px] font-mono">● Aktywne</span>}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{lt.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Window Light Direction controls */}
+              <div className="mt-3 pt-3 border-t border-slate-800">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <SunMedium className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-white">
+                    Kierunek Okna & Słońca (dopasuj padanie cieni do Twojego zdjęcia):
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { dir: 'left' as const, label: 'Okno po lewej', desc: 'Cienie padają w prawo' },
+                    { dir: 'center' as const, label: 'Okno z tyłu', desc: 'Cienie padają do przodu' },
+                    { dir: 'right' as const, label: 'Okno po prawej', desc: 'Cienie padają w lewo' },
+                    { dir: 'front' as const, label: 'Światło od wejścia', desc: 'Cienie padają w głąb' },
+                  ].map((d) => {
+                    const isSel = windowLightDirection === d.dir;
+                    return (
+                      <button
+                        key={d.dir}
+                        onClick={() => setWindowLightDirection(d.dir)}
+                        className={`p-2.5 rounded-xl border text-left transition active:scale-95 ${
+                          isSel
+                            ? 'border-amber-400 bg-amber-950/40 ring-1 ring-amber-400/40 text-white'
+                            : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center justify-between">
+                          <span>{d.label}</span>
+                          {isSel && <span className="text-amber-400 text-[10px]">●</span>}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{d.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Asystent Kalibracji Perspektywy Zdjęcia */}
+      {showPerspectiveMatch && (
+        <div className="absolute bottom-20 right-4 left-4 sm:left-auto sm:w-[460px] z-40 pointer-events-auto rounded-3xl border border-teal-500/60 bg-slate-950/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-3 max-h-[460px] overflow-y-auto">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center">
+                <Crosshair className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Kalibracja Perspektywy Zdjęcia
+                </h4>
+                <p className="text-[10px] text-slate-400">Dopasuj kamerę 3D do geometrii Twojego pokoju</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPerspectiveMatch(false)}
+              className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              title="Zamknij asystenta kalibracji"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Quick 1-Click Presets */}
+          <div className="mb-3">
+            <div className="text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span>Szybkie profile wysokości aparatu:</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleApplyPerspectivePreset('eye_standing')}
+                className="p-2 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-teal-500/60 hover:bg-teal-950/20 text-left transition text-xs"
+              >
+                <div className="font-bold text-white">🚶 Na stojąco</div>
+                <div className="text-[10px] text-slate-400">Wys. 1.55m • FOV 65°</div>
+              </button>
+              <button
+                onClick={() => handleApplyPerspectivePreset('sitting_couch')}
+                className="p-2 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-teal-500/60 hover:bg-teal-950/20 text-left transition text-xs"
+              >
+                <div className="font-bold text-white">🛋️ Z Kanapy / Krzesła</div>
+                <div className="text-[10px] text-slate-400">Wys. 1.10m • FOV 60°</div>
+              </button>
+              <button
+                onClick={() => handleApplyPerspectivePreset('wide_corner')}
+                className="p-2 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-teal-500/60 hover:bg-teal-950/20 text-left transition text-xs"
+              >
+                <div className="font-bold text-white">📐 Narożnik 0.5x</div>
+                <div className="text-[10px] text-slate-400">Wys. 1.50m • Szeroki kąt 82°</div>
+              </button>
+              <button
+                onClick={() => handleApplyPerspectivePreset('front_door')}
+                className="p-2 rounded-xl border border-slate-800 bg-slate-900/70 hover:border-teal-500/60 hover:bg-teal-950/20 text-left transition text-xs"
+              >
+                <div className="font-bold text-white">🚪 Z Progu Drzwi</div>
+                <div className="text-[10px] text-slate-400">Wys. 1.60m • FOV 68°</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Sliders for precise adjustment */}
+          <div className="space-y-3 bg-slate-900/50 p-3 rounded-2xl border border-slate-800">
+            {/* FOV (Kąt widzenia obiektywu) */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-300 font-medium">Kąt obiektywu (FOV):</span>
+                <span className="text-teal-400 font-mono font-bold">{cameraFov}°</span>
+              </div>
+              <input
+                type="range"
+                min="45"
+                max="90"
+                step="1"
+                value={cameraFov}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setCameraFov(val);
+                  applyCameraPerspective(val, cameraHeightVal, cameraPitchVal, cameraYawVal, cameraDistVal);
+                }}
+                className="w-full accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+              />
+              <div className="flex justify-between text-[9px] text-slate-500 mt-0.5">
+                <span>Wąski (45°)</span>
+                <span>Smartfon 1x (60°-68°)</span>
+                <span>Szeroki 0.5x (82°-90°)</span>
+              </div>
+            </div>
+
+            {/* Height (Wysokość trzymania telefonu) */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-300 font-medium">Wysokość trzymania telefonu:</span>
+                <span className="text-teal-400 font-mono font-bold">{cameraHeightVal.toFixed(2)} m</span>
+              </div>
+              <input
+                type="range"
+                min="0.60"
+                max="2.40"
+                step="0.05"
+                value={cameraHeightVal}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setCameraHeightVal(val);
+                  applyCameraPerspective(cameraFov, val, cameraPitchVal, cameraYawVal, cameraDistVal);
+                }}
+                className="w-full accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+              />
+            </div>
+
+            {/* Pitch (Pochylenie w dół/górę) */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-300 font-medium">Kąt pochylenia (Pitch):</span>
+                <span className="text-teal-400 font-mono font-bold">{cameraPitchVal}°</span>
+              </div>
+              <input
+                type="range"
+                min="-35"
+                max="20"
+                step="1"
+                value={cameraPitchVal}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setCameraPitchVal(val);
+                  applyCameraPerspective(cameraFov, cameraHeightVal, val, cameraYawVal, cameraDistVal);
+                }}
+                className="w-full accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+              />
+            </div>
+
+            {/* Yaw (Kąt obrotu wokół pokoju) */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-slate-300 font-medium">Kierunek patrzenia (Yaw):</span>
+                <span className="text-teal-400 font-mono font-bold">{cameraYawVal}°</span>
+              </div>
+              <input
+                type="range"
+                min="-180"
+                max="180"
+                step="2"
+                value={cameraYawVal}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setCameraYawVal(val);
+                  applyCameraPerspective(cameraFov, cameraHeightVal, cameraPitchVal, val, cameraDistVal);
+                }}
+                className="w-full accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Vanishing Lines Grid toggle */}
+          <div className="mt-3 flex items-center justify-between p-2.5 rounded-xl border border-amber-500/40 bg-amber-950/20">
+            <div className="flex items-center gap-2">
+              <Grid className="w-4 h-4 text-amber-400" />
+              <div>
+                <div className="text-xs font-bold text-white">Siatka zbiegu perspektywy</div>
+                <div className="text-[10px] text-slate-400">Linia horyzontu i linie zbiegu ścian</div>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowVanishingGrid(!showVanishingGrid)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                showVanishingGrid
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              {showVanishingGrid ? 'Włączona' : 'Wyłączona'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Floor BOM / Cost Estimate HUD Widget */}
+      {showFloorBomHud && (
+        <div className="absolute top-20 right-4 z-40 pointer-events-auto rounded-3xl border border-emerald-500/50 bg-slate-950/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 w-80">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <Calculator className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white">Kosztorys Posadzki</h4>
+                <p className="text-[10px] text-slate-400">{room.name}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowFloorBomHud(false)}
+              className="rounded-xl p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between py-1 border-b border-slate-900">
+              <span className="text-slate-400">Wybrany materiał:</span>
+              <span className="text-white font-bold">{room.design.floorType || 'Panele / Posadzka'}</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-slate-900">
+              <span className="text-slate-400">Powierzchnia netto:</span>
+              <span className="text-slate-200 font-mono font-bold">{(room.width * room.length).toFixed(2)} m²</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-slate-900">
+              <span className="text-slate-400">Zapas ITB (+10% docinki):</span>
+              <span className="text-emerald-400 font-mono font-bold">{(room.width * room.length * 1.10).toFixed(2)} m²</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-slate-900">
+              <span className="text-slate-400">Zapotrzebowanie paczek:</span>
+              <span className="text-white font-mono font-bold">{Math.ceil((room.width * room.length * 1.10) / 2.22)} paczek</span>
+            </div>
+            <div className="flex justify-between pt-2">
+              <span className="text-slate-300 font-bold">Szacowany koszt:</span>
+              <span className="text-emerald-400 font-mono font-bold text-sm">
+                ~{Math.round(room.width * room.length * 1.10 * 129).toLocaleString('pl-PL')} zł
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
