@@ -289,6 +289,16 @@ export default function HomePage() {
     updateProject({ ...project, rooms: updatedRooms });
   }, [project, updateProject]);
 
+  // Update room before / after comparison photos (IndexedDB storage)
+  const handleUpdateRoomPhotos = useCallback((roomId: string, updates: { beforePhotoUrl?: string; afterPhotoUrl?: string }) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return { ...r, ...updates };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+    showToast('Zaktualizowano zdjęcia metamorfozy pomieszczenia', { type: 'success' });
+  }, [project, updateProject, showToast]);
+
   // Expenses handlers
   const handleAddExpense = useCallback((expense: Expense) => {
     updateProject({
@@ -586,6 +596,7 @@ export default function HomePage() {
                 qaChecklist: [...project.qaChecklist, item],
               });
             }}
+            onUpdateRoomPhotos={handleUpdateRoomPhotos}
           />
         );
 

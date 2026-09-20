@@ -15,14 +15,23 @@ import {
   TrendingUp,
   Sparkles,
   Plus,
-  X
+  X,
+  UploadCloud,
+  Camera,
+  RotateCcw,
+  Image as ImageIcon,
+  Check,
+  Loader2
 } from 'lucide-react';
+import { usePhotoSrc, LOCAL_PHOTO_PREFIX, savePhotoBlob, deletePhotoBlob } from '@/lib/db';
+import { compressImage } from '@/lib/image-compressor';
 
 interface ViewProgressQAProps {
   room: Room;
   qaItems: QAChecklistItem[];
   onUpdateQAStatus: (qaId: string, status: QAChecklistItem['status']) => void;
   onAddQACheck: (item: QAChecklistItem) => void;
+  onUpdateRoomPhotos?: (roomId: string, updates: { beforePhotoUrl?: string; afterPhotoUrl?: string }) => void;
 }
 
 export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
@@ -30,9 +39,10 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   qaItems,
   onUpdateQAStatus,
   onAddQACheck,
+  onUpdateRoomPhotos,
 }) => {
   const [activeTab, setActiveTab] = useState<'before_after' | 'qa' | 'diy'>('before_after');
-  const [sliderPosition, setSliderPosition] = useState(52); // percentage 0 - 100
+  const [sliderPosition, setSliderPosition] = useState(50); // percentage 0 - 100
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newNorm, setNewNorm] = useState('');
@@ -41,13 +51,89 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   const [newTolerance, setNewTolerance] = useState('');
   const [newTips, setNewTips] = useState('');
 
+  // Photo upload & compression states
+  const [isCompressingBefore, setIsCompressingBefore] = useState(false);
+  const [isCompressingAfter, setIsCompressingAfter] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // Resolve IndexedDB blobs or remote URLs
+  const resolvedBeforePhoto = usePhotoSrc(room.beforePhotoUrl);
+  const resolvedAfterPhoto = usePhotoSrc(room.afterPhotoUrl);
+
+  const beforePhoto = resolvedBeforePhoto || room.beforePhotoUrl || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
+  const afterPhoto = resolvedAfterPhoto || room.afterPhotoUrl || 'https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=800&q=80';
+
+  const isCustomBefore = Boolean(room.beforePhotoUrl && room.beforePhotoUrl.startsWith(LOCAL_PHOTO_PREFIX));
+  const isCustomAfter = Boolean(room.afterPhotoUrl && room.afterPhotoUrl.startsWith(LOCAL_PHOTO_PREFIX));
+
+  const handleUploadPhoto = async (
+    type: 'before' | 'after',
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isBefore = type === 'before';
+    if (isBefore) setIsCompressingBefore(true);
+    else setIsCompressingAfter(true);
+
+    try {
+      const origSizeKb = (file.size / 1024).toFixed(0);
+      const compressedBlob = await compressImage(file, {
+        maxWidth: 1920,
+        maxHeight: 1080,
+        quality: 0.85,
+        mimeType: 'image/webp',
+      });
+      const compSizeKb = (compressedBlob.size / 1024).toFixed(0);
+
+      // Clean up previous blob from IndexedDB if it was custom
+      const currentUrl = isBefore ? room.beforePhotoUrl : room.afterPhotoUrl;
+      if (currentUrl?.startsWith(LOCAL_PHOTO_PREFIX)) {
+        const oldId = currentUrl.slice(LOCAL_PHOTO_PREFIX.length);
+        deletePhotoBlob(oldId).catch((err) => console.warn('Failed to delete old photo blob', err));
+      }
+
+      const photoId = `room-${room.id}-${type}-${Date.now()}`;
+      await savePhotoBlob(photoId, compressedBlob);
+
+      const newUrl = `${LOCAL_PHOTO_PREFIX}${photoId}`;
+      onUpdateRoomPhotos?.(
+        room.id,
+        isBefore ? { beforePhotoUrl: newUrl } : { afterPhotoUrl: newUrl }
+      );
+
+      setStatusMessage(
+        `Wgrano i skompresowano zdjęcie ${isBefore ? 'PRZED' : 'PO'}: ${origSizeKb} KB → ${compSizeKb} KB (WebP)`
+      );
+    } catch (err) {
+      console.error('Błąd podczas wgrywania zdjęcia:', err);
+      setStatusMessage('Wystąpił błąd podczas kompresji lub zapisu zdjęcia.');
+    } finally {
+      if (isBefore) setIsCompressingBefore(false);
+      else setIsCompressingAfter(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleResetPhoto = async (type: 'before' | 'after') => {
+    const isBefore = type === 'before';
+    const currentUrl = isBefore ? room.beforePhotoUrl : room.afterPhotoUrl;
+    if (currentUrl?.startsWith(LOCAL_PHOTO_PREFIX)) {
+      const oldId = currentUrl.slice(LOCAL_PHOTO_PREFIX.length);
+      deletePhotoBlob(oldId).catch((err) => console.warn('Failed to delete old photo blob', err));
+    }
+    onUpdateRoomPhotos?.(
+      room.id,
+      isBefore ? { beforePhotoUrl: undefined } : { afterPhotoUrl: undefined }
+    );
+    setStatusMessage(`Przywrócono domyślne zdjęcie poglądowe ${isBefore ? 'PRZED' : 'PO'}`);
+  };
+
   // Filter QA items for current room or global
   const currentQA = qaItems.filter((q) => !q.roomId || q.roomId === room.id);
   const passedCount = currentQA.filter((q) => q.status === 'passed').length;
   const failedCount = currentQA.filter((q) => q.status === 'failed').length;
-
-  const beforePhoto = room.beforePhotoUrl || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
-  const afterPhoto = room.afterPhotoUrl || 'https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=800&q=80';
 
   return (
     <div className="space-y-6">
@@ -112,8 +198,8 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
 
       {/* Mode 1: Interactive Before / After Split Slider */}
       {activeTab === 'before_after' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
                 <SplitSquareVertical className="w-4 h-4 text-teal-400" />
@@ -123,48 +209,179 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
                 Przesuwaj suwak w lewo lub w prawo, aby bezpośrednio porównać stan przed remontem z efektem finalnym.
               </p>
             </div>
-            <span className="rounded-lg bg-slate-950 border border-slate-800 px-3 py-1 text-xs font-mono text-teal-300">
-              Pozycja: {sliderPosition}%
+            <span className="rounded-lg bg-slate-950 border border-slate-800 px-3 py-1 text-xs font-mono text-teal-300 shrink-0">
+              Pozycja podziału: {sliderPosition}%
             </span>
+          </div>
+
+          {/* Status / Compression Feedback */}
+          {statusMessage && (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-teal-500/30 bg-teal-950/40 px-4 py-2.5 text-xs text-teal-300 animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-teal-400 shrink-0" />
+                <span>{statusMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusMessage(null)}
+                className="text-slate-400 hover:text-white p-1"
+                aria-label="Zamknij powiadomienie"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Photo Management Control Cards (Before & After) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* Before Photo Card */}
+            <div className="rounded-xl border border-amber-500/30 bg-slate-950/70 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                    Stan Przed Remontem
+                  </span>
+                </div>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
+                  isCustomBefore 
+                    ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300' 
+                    : 'border-slate-700 bg-slate-900 text-slate-400'
+                }`}>
+                  {isCustomBefore ? '✓ Twoje zdjęcie' : 'Wzorzec domyślny'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Wgraj zdjęcie surowego stanu pokoju (ze smartfona lub aparatu). Zostanie automatycznie zoptymalizowane w WebP.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer shadow-xs ${
+                  isCompressingBefore 
+                    ? 'bg-amber-900/50 text-amber-200 cursor-wait' 
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                }`}>
+                  {isCompressingBefore ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>{isCompressingBefore ? 'Kompresowanie...' : isCustomBefore ? 'Zmień zdjęcie PRZED' : 'Wgraj zdjęcie PRZED'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={isCompressingBefore}
+                    className="hidden"
+                    onChange={(e) => handleUploadPhoto('before', e)}
+                  />
+                </label>
+                {isCustomBefore && (
+                  <button
+                    type="button"
+                    onClick={() => handleResetPhoto('before')}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                    title="Przywróć zdjęcie domyślne"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* After Photo Card */}
+            <div className="rounded-xl border border-teal-500/30 bg-slate-950/70 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-teal-400" />
+                  <span className="text-xs font-bold text-teal-300 uppercase tracking-wider">
+                    Stan Po Remoncie
+                  </span>
+                </div>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
+                  isCustomAfter 
+                    ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300' 
+                    : 'border-slate-700 bg-slate-900 text-slate-400'
+                }`}>
+                  {isCustomAfter ? '✓ Twoje zdjęcie' : 'Wzorzec domyślny'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Wgraj zdjęcie po zakończeniu prac lub wizualizację projektu. Kompresja lokalna w przeglądarce chroni pamięć urządzenia.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer shadow-xs ${
+                  isCompressingAfter 
+                    ? 'bg-teal-900/50 text-teal-200 cursor-wait' 
+                    : 'bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500/30'
+                }`}>
+                  {isCompressingAfter ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5 text-teal-400" />
+                  )}
+                  <span>{isCompressingAfter ? 'Kompresowanie...' : isCustomAfter ? 'Zmień zdjęcie PO' : 'Wgraj zdjęcie PO'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={isCompressingAfter}
+                    className="hidden"
+                    onChange={(e) => handleUploadPhoto('after', e)}
+                  />
+                </label>
+                {isCustomAfter && (
+                  <button
+                    type="button"
+                    onClick={() => handleResetPhoto('after')}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                    title="Przywróć zdjęcie domyślne"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
           </div>
 
           {/* Slider Canvas Stage */}
           <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-700 select-none shadow-2xl bg-black">
             
-            {/* After Image (Base) */}
+            {/* After Image (Base Layer - Full View) */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img 
               src={afterPhoto} 
               alt="Stan po remoncie" 
               className="absolute inset-0 w-full h-full object-cover pointer-events-none"
             />
-            <div className="absolute bottom-4 right-4 rounded-lg bg-slate-950/80 backdrop-blur-md px-3 py-1 text-xs font-bold text-teal-300 border border-teal-500/40 z-10">
-              PO REMONCIE (PROJEKT FINALNY)
+            <div className="absolute bottom-4 right-4 rounded-lg bg-slate-950/85 backdrop-blur-md px-3 py-1 text-xs font-bold text-teal-300 border border-teal-500/40 z-10">
+              PO REMONCIE (FINALNY)
             </div>
 
-            {/* Before Image (Clipped Overlay) */}
+            {/* Before Image (Overlay with hardware-accelerated clip-path) */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img 
+              src={beforePhoto} 
+              alt="Stan przed remontem" 
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              style={{
+                clipPath: `inset(0 ${100 - sliderPosition}% 0 0)`
+              }}
+            />
             <div 
-              className="absolute inset-0 overflow-hidden pointer-events-none transition-none"
-              style={{ width: `${sliderPosition}%` }}
+              className="absolute bottom-4 left-4 rounded-lg bg-slate-950/85 backdrop-blur-md px-3 py-1 text-xs font-bold text-amber-300 border border-amber-500/40 z-10 transition-opacity"
+              style={{ opacity: sliderPosition > 10 ? 1 : 0 }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img 
-                src={beforePhoto} 
-                alt="Stan przed remontem" 
-                className="absolute inset-0 w-full h-full object-cover max-w-none"
-                style={{ width: '100%', height: '100%', minWidth: '100vw' }}
-              />
-              <div className="absolute bottom-4 left-4 rounded-lg bg-slate-950/80 backdrop-blur-md px-3 py-1 text-xs font-bold text-amber-300 border border-amber-500/40 z-10">
-                PRZED REMONTEM (STAN SUROWY)
-              </div>
+              PRZED REMONTEM (SUROWY)
             </div>
 
-            {/* Split Divider Line & Handle */}
+            {/* Split Divider Line & Draggable Handle */}
             <div 
-              className="absolute top-0 bottom-0 w-1 bg-white shadow-2xl z-20 pointer-events-none flex items-center justify-center"
+              className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] z-20 pointer-events-none flex items-center justify-center"
               style={{ left: `${sliderPosition}%` }}
             >
-              <div className="h-9 w-9 rounded-full bg-slate-950 border-2 border-teal-400 flex items-center justify-center text-teal-300 shadow-xl pointer-events-auto cursor-ew-resize active:scale-110 transition-transform">
+              <div className="h-10 w-10 rounded-full bg-slate-950 border-2 border-teal-400 flex items-center justify-center text-teal-300 shadow-xl pointer-events-auto cursor-ew-resize active:scale-110 hover:border-white transition-transform">
                 <span className="text-xs font-bold font-mono">⇔</span>
               </div>
             </div>
@@ -177,12 +394,18 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
               value={sliderPosition}
               onChange={(e) => setSliderPosition(parseInt(e.target.value))}
               className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-30"
+              aria-label="Pozycja suwaka przed i po"
             />
           </div>
 
-          <p className="text-center text-xs text-slate-400 italic">
-            Wskazówka: Złap za uchwyt na środku zdjęcia i przesuwaj w poziomie.
-          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2 px-1">
+            <span className="italic">
+              💡 Wskazówka: Złap za uchwyt ⇔ na środku zdjęcia i przesuwaj w poziomie.
+            </span>
+            <span className="text-[11px] text-slate-500">
+              Zdjęcia przechowywane są bezpiecznie w pamięci lokalnej Twojej przeglądarki (IndexedDB).
+            </span>
+          </div>
         </div>
       )}
 
