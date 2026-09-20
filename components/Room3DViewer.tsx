@@ -45,8 +45,17 @@ import {
   Monitor,
   AlertTriangle,
   ShieldCheck,
-  Footprints
+  Footprints,
+  UploadCloud,
+  SlidersHorizontal,
+  Image as ImageIcon,
+  SplitSquareVertical,
+  Wrench,
+  Paintbrush,
+  Box
 } from 'lucide-react';
+import { usePhotoSrc, LOCAL_PHOTO_PREFIX, savePhotoBlob } from '@/lib/db';
+import { compressImage } from '@/lib/image-compressor';
 
 interface Room3DViewerProps {
   room: Room;
@@ -56,6 +65,7 @@ interface Room3DViewerProps {
   className?: string;
   onOpenShowcase?: () => void;
   onOpenWalkthrough?: () => void;
+  onUpdateRoomPhoto?: (photoUrl: string) => void;
 }
 
 /**
@@ -88,6 +98,154 @@ function disposeHierarchy(obj: THREE.Object3D) {
 
 type LightingPreset = 'day' | 'sunset' | 'night';
 type CameraViewPreset = 'isometric' | 'eye_level' | 'top_down' | 'corner';
+export type RemodelPhotoViewMode = '3d_mesh' | 'photo_overlay' | 'photo_wall' | 'split_compare';
+
+const FLOOR_PRESETS = [
+  {
+    id: 'herringbone_oak',
+    name: 'Dąb Jodełka',
+    desc: 'Parkiet dębowy jodełka francuska',
+    floorType: 'Parkiet Dębowy Jodełka Francuska',
+    floorTexture: 'herringbone' as const,
+    floorColor: '#b48256',
+    floorRoughness: 0.32,
+    previewColor: '#b48256',
+  },
+  {
+    id: 'plank_oak',
+    name: 'Dąb Deska',
+    desc: 'Deska warstwowa dąb bielony',
+    floorType: 'Deska Warstwowa Dąb Bielony',
+    floorTexture: 'plank' as const,
+    floorColor: '#c59b6d',
+    floorRoughness: 0.35,
+    previewColor: '#c59b6d',
+  },
+  {
+    id: 'marble_carrara',
+    name: 'Marmur Carrara',
+    desc: 'Gres wielkoformatowy 60x120',
+    floorType: 'Gres Wielkoformatowy Marmur Carrara',
+    floorTexture: 'marble' as const,
+    floorColor: '#f8fafc',
+    floorRoughness: 0.15,
+    previewColor: '#f8fafc',
+  },
+  {
+    id: 'microcement_loft',
+    name: 'Mikrocement',
+    desc: 'Posadzka bezspoinowa loft',
+    floorType: 'Mikrocement Szary Satynowy',
+    floorTexture: 'microcement' as const,
+    floorColor: '#94a3b8',
+    floorRoughness: 0.45,
+    previewColor: '#94a3b8',
+  },
+  {
+    id: 'terrazzo_modern',
+    name: 'Terrazzo Lastryko',
+    desc: 'Płytki terrazzo lastryko',
+    floorType: 'Płytki Terrazzo Lastryko',
+    floorTexture: 'terrazzo' as const,
+    floorColor: '#e2e8f0',
+    floorRoughness: 0.30,
+    previewColor: '#cbd5e1',
+  },
+  {
+    id: 'tiles_graphite',
+    name: 'Gres Ciemny',
+    desc: 'Płyty gresowe grafit mat',
+    floorType: 'Płyty Gresowe Grafit Mat',
+    floorTexture: 'tiles' as const,
+    floorColor: '#334155',
+    floorRoughness: 0.25,
+    previewColor: '#334155',
+  },
+];
+
+const WALL_PRESETS = [
+  {
+    id: 'white_clean',
+    name: 'Świeża Biel',
+    desc: 'Farba ceramiczna śnieżnobiała',
+    wallType: 'Farba Ceramiczna Śnieżnobiała',
+    wallTexture: 'matte' as const,
+    wallColor: '#f8fafc',
+    wallRoughness: 0.85,
+    previewColor: '#f8fafc',
+  },
+  {
+    id: 'cashmere_warm',
+    name: 'Ciepły Kaszmir',
+    desc: 'Farba lateksowa ciepły kaszmir',
+    wallType: 'Farba Lateksowa Ciepły Kaszmir',
+    wallTexture: 'matte' as const,
+    wallColor: '#e7e0d3',
+    wallRoughness: 0.85,
+    previewColor: '#e7e0d3',
+  },
+  {
+    id: 'wood_slats',
+    name: 'Lamele Dębowe',
+    desc: 'Panele ścienne lamele akustyczne',
+    wallType: 'Panele Ścienne Lamele Dębowe',
+    wallTexture: 'slats' as const,
+    wallColor: '#a16207',
+    wallRoughness: 0.65,
+    previewColor: '#a16207',
+  },
+  {
+    id: 'concrete_panels',
+    name: 'Beton Loftowy',
+    desc: 'Płyty z betonu architektonicznego',
+    wallType: 'Płyty z Betonu Architektonicznego',
+    wallTexture: 'concrete_panels' as const,
+    wallColor: '#64748b',
+    wallRoughness: 0.70,
+    previewColor: '#64748b',
+  },
+  {
+    id: 'brick_white',
+    name: 'Biała Cegła',
+    desc: 'Stara cegła bielona',
+    wallType: 'Stara Cegła Bielona',
+    wallTexture: 'brick' as const,
+    wallColor: '#f1f5f9',
+    wallRoughness: 0.75,
+    previewColor: '#e2e8f0',
+  },
+  {
+    id: 'sage_green',
+    name: 'Szałwiowa Zieleń',
+    desc: 'Tynk dekoracyjny szałwia mat',
+    wallType: 'Tynk Dekoracyjny Szałwia Mat',
+    wallTexture: 'stucco' as const,
+    wallColor: '#788c7a',
+    wallRoughness: 0.85,
+    previewColor: '#788c7a',
+  },
+  {
+    id: 'graphite_loft',
+    name: 'Antracyt Loft',
+    desc: 'Farba magnetyczna grafit mat',
+    wallType: 'Farba Magnetyczno-Tablicowa Grafit',
+    wallTexture: 'matte' as const,
+    wallColor: '#1e293b',
+    wallRoughness: 0.85,
+    previewColor: '#1e293b',
+  },
+];
+
+const QUICK_FURNITURE_ITEMS = [
+  { id: 'sofa', name: 'Sofa 3-osobowa', iconType: 'sofa', model3DUrl: 'sofa', color: '#384252', width: 32, height: 22 },
+  { id: 'table', name: 'Stół Dębowy', iconType: 'table', model3DUrl: 'table', color: '#854d0e', width: 26, height: 18 },
+  { id: 'coffee_table', name: 'Stolik Kawowy', iconType: 'coffee_table', model3DUrl: 'coffee_table', color: '#f1f5f9', width: 16, height: 16 },
+  { id: 'tv_cabinet', name: 'Szafka RTV + TV', iconType: 'tv_cabinet', model3DUrl: 'tv_cabinet', color: '#1e293b', width: 30, height: 14 },
+  { id: 'bed', name: 'Łóżko Kontynentalne', iconType: 'bed', model3DUrl: 'bed', color: '#f8fafc', width: 28, height: 32 },
+  { id: 'wardrobe', name: 'Szafa Garderobiana', iconType: 'wardrobe', model3DUrl: 'wardrobe', color: '#78350f', width: 24, height: 16 },
+  { id: 'plant', name: 'Monstera w Donicy', iconType: 'plant', model3DUrl: 'plant', color: '#ffffff', width: 12, height: 12 },
+  { id: 'chair', name: 'Fotel Wypoczynkowy', iconType: 'chair', model3DUrl: 'chair', color: '#0f766e', width: 16, height: 16 },
+];
 
 export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   room,
@@ -97,6 +255,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   className = '',
   onOpenShowcase,
   onOpenWalkthrough,
+  onUpdateRoomPhoto,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -108,6 +267,8 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   const roomGroupRef = useRef<THREE.Group | null>(null);
   const lightsGroupRef = useRef<THREE.Group | null>(null);
   const selectionGroupRef = useRef<THREE.Group | null>(null);
+  const groundRef = useRef<THREE.Mesh | null>(null);
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
 
   // Keep fresh props in refs for event listeners and animation loop
   const roomRef = useRef(room);
@@ -117,6 +278,126 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     roomRef.current = room;
     onUpdateFurnitureRef.current = onUpdateFurniture;
   }, [room, onUpdateFurniture]);
+
+  // Photo & Remodel Mode state
+  const [photoDisplayMode, setPhotoDisplayMode] = useState<RemodelPhotoViewMode>('3d_mesh');
+  const photoDisplayModeRef = useRef<RemodelPhotoViewMode>(photoDisplayMode);
+  useEffect(() => {
+    photoDisplayModeRef.current = photoDisplayMode;
+  }, [photoDisplayMode]);
+
+  const [photoBlendOpacity, setPhotoBlendOpacity] = useState<number>(75);
+  const [splitSliderPos, setSplitSliderPos] = useState<number>(50);
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
+  const [showQuickRemodel, setShowQuickRemodel] = useState(false);
+  const [quickRemodelTab, setQuickRemodelTab] = useState<'floors' | 'walls' | 'furniture' | 'light'>('floors');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const resolvedPhotoSrc = usePhotoSrc(room.photoUrl);
+
+  // Photo Upload Handler with Client-Side WebP Compression & IndexedDB Storage
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsCompressingPhoto(true);
+      const compressed = await compressImage(file, {
+        maxWidth: 1920,
+        maxHeight: 1080,
+        quality: 0.85,
+      });
+      const photoId = `${room.id}-${Date.now()}`;
+      await savePhotoBlob(photoId, compressed);
+      const newPhotoUrl = `${LOCAL_PHOTO_PREFIX}${photoId}`;
+      onUpdateRoomPhoto?.(newPhotoUrl);
+      if (photoDisplayMode === '3d_mesh') {
+        setPhotoDisplayMode('photo_overlay');
+      }
+    } catch (err) {
+      console.error('Błąd podczas zapisywania zdjęcia pokoju:', err);
+    } finally {
+      setIsCompressingPhoto(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Split Comparison Slider Drag handler (Mouse & Touch)
+  const handleSplitDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    const onMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const clientX = 'touches' in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const x = clientX - rect.left;
+      const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      setSplitSliderPos(Math.round(pct));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onUp);
+  };
+
+  // Quick Remodel Action Handlers
+  const handleSelectFloorPreset = (preset: typeof FLOOR_PRESETS[number]) => {
+    if (!onUpdateRoomDesign) return;
+    onUpdateRoomDesign(room.id, {
+      ...room.design,
+      floorType: preset.floorType,
+      floorTexture: preset.floorTexture,
+      floorColor: preset.floorColor,
+      floorRoughness: preset.floorRoughness,
+    });
+  };
+
+  const handleSelectWallPreset = (preset: typeof WALL_PRESETS[number]) => {
+    if (!onUpdateRoomDesign) return;
+    onUpdateRoomDesign(room.id, {
+      ...room.design,
+      wallType: preset.wallType,
+      wallTexture: preset.wallTexture,
+      wallColor: preset.wallColor,
+      wallRoughness: preset.wallRoughness,
+    });
+  };
+
+  const handleQuickAddFurniture = (preset: typeof QUICK_FURNITURE_ITEMS[number]) => {
+    if (!onUpdateFurniture) return;
+    const existingCount = room.furniture?.length || 0;
+    const offsetX = (existingCount % 3) * 6;
+    const offsetY = (Math.floor(existingCount / 3) % 3) * 6;
+    const newFurn: RoomFurniture = {
+      id: `furn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: preset.name,
+      x: Math.min(80, Math.max(20, 50 + offsetX)),
+      y: Math.min(80, Math.max(20, 50 + offsetY)),
+      width: preset.width,
+      height: preset.height,
+      rotation: 0,
+      iconType: preset.iconType,
+      model3DUrl: preset.model3DUrl,
+      color: preset.color,
+    };
+    const updated = [...(room.furniture || []), newFurn];
+    onUpdateFurniture(room.id, updated);
+    setSelectedFurnitureId(newFurn.id);
+  };
+
+  const handleSelectLightTemp = (tempK: number) => {
+    if (!onUpdateRoomDesign) return;
+    onUpdateRoomDesign(room.id, {
+      ...room.design,
+      lightingTempK: tempK,
+    });
+  };
 
   // Smooth camera transition ref
   const cameraTransitionRef = useRef<{
@@ -190,6 +471,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       antialias: true,
       preserveDrawingBuffer: true,
       powerPreference: 'high-performance',
+      alpha: true,
     });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -257,10 +539,12 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     ground.position.y = -0.01;
     ground.receiveShadow = true;
     scene.add(ground);
+    groundRef.current = ground;
 
     const gridHelper = new THREE.GridHelper(24, 24, '#1e293b', '#0f172a');
     gridHelper.position.y = 0.001;
     scene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
 
     // 8. Pointer Event Listeners for 3D Furniture Click & Floor Drag
     const domElement = renderer.domElement;
@@ -484,7 +768,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       }
       controls.update();
 
-      if (enableBloom && composerRef.current) {
+      if (enableBloom && composerRef.current && photoDisplayModeRef.current !== 'photo_overlay') {
         composerRef.current.render();
       } else {
         renderer.render(scene, camera);
@@ -524,6 +808,27 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       }
     };
   }, [enableBloom]);
+
+  // Effect to switch Three.js scene background/clearColor and ground visibility based on photoDisplayMode
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    if (!scene || !renderer) return;
+
+    if (photoDisplayMode === 'photo_overlay') {
+      scene.background = null;
+      scene.fog = null;
+      renderer.setClearColor(0x000000, 0);
+      if (groundRef.current) groundRef.current.visible = false;
+      if (gridHelperRef.current) gridHelperRef.current.visible = false;
+    } else {
+      scene.background = new THREE.Color('#090d16');
+      scene.fog = new THREE.FogExp2('#090d16', 0.035);
+      renderer.setClearColor(0x090d16, 1);
+      if (groundRef.current) groundRef.current.visible = true;
+      if (gridHelperRef.current) gridHelperRef.current.visible = true;
+    }
+  }, [photoDisplayMode]);
 
   const roomW = room.width;
   const roomL = room.length;
@@ -722,8 +1027,24 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     });
 
     // Back Wall
+    let backWallMat = wallMat;
+    if (photoDisplayMode === 'photo_wall' && resolvedPhotoSrc) {
+      try {
+        const photoTex = new THREE.TextureLoader().load(resolvedPhotoSrc);
+        photoTex.colorSpace = THREE.SRGBColorSpace;
+        backWallMat = new THREE.MeshStandardMaterial({
+          map: photoTex,
+          roughness: 0.65,
+          metalness: 0.05,
+          side: THREE.DoubleSide,
+        });
+      } catch (err) {
+        console.warn('Failed to load photo texture for back wall:', err);
+      }
+    }
+
     const backWallGeo = new THREE.BoxGeometry(W + wallThick * 2, H, wallThick);
-    const backWall = new THREE.Mesh(backWallGeo, wallMat);
+    const backWall = new THREE.Mesh(backWallGeo, backWallMat);
     backWall.position.set(0, H / 2, -halfL - wallThick / 2);
     backWall.receiveShadow = true;
     backWall.castShadow = true;
@@ -1150,7 +1471,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     artGroup.position.set(0, 1.7, -halfL + 0.02);
     roomGroup.add(artGroup);
 
-  }, [room, showCeiling, cutawayWalls]);
+  }, [room, showCeiling, cutawayWalls, photoDisplayMode, resolvedPhotoSrc]);
 
   // Update selection highlight ring and bracket when selectedFurnitureId or room.furniture changes
   useEffect(() => {
@@ -1279,13 +1600,85 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   };
 
   return (
-    <div className={`relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl ${className}`}>
+    <div className={`relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl select-none ${className}`}>
       
+      {/* Hidden File Input for Room Photo Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handlePhotoUpload}
+      />
+
+      {/* Mode 1 & Mode 3: Photo Background underlay when photoDisplayMode is 'photo_overlay' or 'split_compare' */}
+      {(photoDisplayMode === 'photo_overlay' || photoDisplayMode === 'split_compare') && resolvedPhotoSrc && (
+        <div 
+          className="absolute inset-0 bg-cover bg-center transition-all pointer-events-none"
+          style={{ backgroundImage: `url(${resolvedPhotoSrc})` }}
+        />
+      )}
+
       {/* 3D WebGL Canvas Viewport */}
       <div 
         ref={containerRef} 
-        className="w-full h-[540px] sm:h-[620px] cursor-grab active:cursor-grabbing outline-hidden"
+        className="w-full h-[540px] sm:h-[620px] cursor-grab active:cursor-grabbing outline-hidden relative z-10"
+        style={{
+          opacity: photoDisplayMode === 'photo_overlay' ? photoBlendOpacity / 100 : 1,
+          clipPath: photoDisplayMode === 'split_compare' ? `inset(0 0 0 ${splitSliderPos}%)` : undefined,
+        }}
       />
+
+      {/* Split Screen Draggable Curtain & Badges for 'split_compare' */}
+      {photoDisplayMode === 'split_compare' && resolvedPhotoSrc && (
+        <div className="absolute inset-0 z-20 pointer-events-none">
+          {/* Before Label (Left) */}
+          <div className="absolute top-16 left-4 pointer-events-auto flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-950/85 px-2.5 py-1 text-[11px] font-bold text-amber-300 backdrop-blur-md shadow-lg">
+            <span>Stan Przed Remontem (Zdjęcie)</span>
+          </div>
+
+          {/* After Label (Right) */}
+          <div className="absolute top-16 right-4 pointer-events-auto flex items-center gap-1.5 rounded-xl border border-teal-500/50 bg-teal-950/85 px-2.5 py-1 text-[11px] font-bold text-teal-300 backdrop-blur-md shadow-lg">
+            <Sparkles className="w-3 h-3 text-teal-400" />
+            <span>Projekt Po Remoncie (3D)</span>
+          </div>
+
+          {/* Draggable Divider Handle */}
+          <div
+            className="absolute top-0 bottom-0 w-1 bg-gradient-to-b from-teal-400 via-white to-teal-400 shadow-2xl cursor-ew-resize flex items-center justify-center -ml-0.5 pointer-events-auto"
+            style={{ left: `${splitSliderPos}%` }}
+            onMouseDown={handleSplitDragStart}
+            onTouchStart={handleSplitDragStart}
+          >
+            <div className="w-8 h-8 rounded-full bg-slate-900 border-2 border-teal-400 text-teal-300 flex items-center justify-center shadow-2xl text-xs font-bold select-none hover:scale-110 active:scale-95 transition">
+              ↔
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Opacity Blend Slider for 'photo_overlay' */}
+      {photoDisplayMode === 'photo_overlay' && resolvedPhotoSrc && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-3 rounded-2xl border border-teal-500/50 bg-slate-950/95 px-4 py-2 text-xs shadow-2xl backdrop-blur-xl">
+          <span className="font-semibold text-slate-300 whitespace-nowrap flex items-center gap-1.5">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-teal-400" />
+            <span>Przenikanie projektu:</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-400 font-mono">Zdjęcie</span>
+            <input
+              type="range"
+              min="10"
+              max="100"
+              step="1"
+              value={photoBlendOpacity}
+              onChange={(e) => setPhotoBlendOpacity(parseInt(e.target.value, 10))}
+              className="w-28 sm:w-40 accent-teal-500 h-1.5 rounded-lg bg-slate-800 cursor-pointer"
+            />
+            <span className="text-[10px] text-teal-300 font-mono font-bold w-9">{photoBlendOpacity}%</span>
+          </div>
+        </div>
+      )}
 
       {/* Real-time Clearance / Collision HUD indicator */}
       {dragCollisionState && (
@@ -1403,7 +1796,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       )}
 
       {/* Top Floating Overlay Bar */}
-      <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+      <div className="absolute top-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none z-30">
         
         {/* Room Architectural Tag */}
         <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border border-slate-700/80 bg-slate-900/90 px-4 py-2 text-xs backdrop-blur-md shadow-lg">
@@ -1421,6 +1814,101 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
               {room.width.toFixed(2)}m × {room.length.toFixed(2)}m • Wys. {room.height.toFixed(2)}m • Pow. {room.area.toFixed(2)} m²
             </div>
           </div>
+        </div>
+
+        {/* Photo Upload & Remodeling Mode Switcher */}
+        <div className="pointer-events-auto flex items-center gap-1.5">
+          {resolvedPhotoSrc ? (
+            <div className="flex items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/90 p-1 backdrop-blur-md shadow-lg">
+              <button
+                onClick={() => setPhotoDisplayMode('3d_mesh')}
+                className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                  photoDisplayMode === '3d_mesh'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+                title="Czysty model 3D bez podkładu zdjęcia"
+              >
+                <Box className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Model 3D</span>
+              </button>
+              <button
+                onClick={() => setPhotoDisplayMode('photo_overlay')}
+                className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                  photoDisplayMode === 'photo_overlay'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+                title="Podkład Twojego zdjęcia z suwakiem przenikania projektu 3D"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Podkład AR</span>
+              </button>
+              <button
+                onClick={() => setPhotoDisplayMode('photo_wall')}
+                className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                  photoDisplayMode === 'photo_wall'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+                title="Zdjęcie nałożone na tylną ścianę pokoju w 3D"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Ściana Foto</span>
+              </button>
+              <button
+                onClick={() => setPhotoDisplayMode('split_compare')}
+                className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                  photoDisplayMode === 'split_compare'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+                title="Interaktywny suwak porównania Przed i Po"
+              >
+                <SplitSquareVertical className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Przed / Po</span>
+              </button>
+
+              {/* Change Photo Button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isCompressingPhoto}
+                className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[11px] text-slate-300 ml-1 transition"
+                title="Zmień wgrane zdjęcie pokoju"
+              >
+                <img
+                  src={resolvedPhotoSrc}
+                  alt="Pokój"
+                  className="w-4 h-4 rounded-xs object-cover border border-slate-600"
+                />
+                <span className="hidden md:inline">Zmień</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isCompressingPhoto}
+              className="flex items-center gap-1.5 rounded-2xl border border-teal-500/60 bg-gradient-to-r from-teal-600 to-cyan-700 hover:brightness-110 px-3.5 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition active:scale-95"
+              title="Wgraj realne zdjęcie pokoju, aby remontować je w 3D"
+            >
+              <UploadCloud className="w-4 h-4 text-teal-200" />
+              <span>{isCompressingPhoto ? 'Kompresja...' : 'Wgraj zdjęcie pokoju'}</span>
+            </button>
+          )}
+
+          {/* Quick Remodel Toggle Button */}
+          <button
+            onClick={() => setShowQuickRemodel(!showQuickRemodel)}
+            className={`flex items-center gap-1.5 rounded-2xl border px-3.5 py-2 text-xs font-bold backdrop-blur-md shadow-lg transition active:scale-95 ${
+              showQuickRemodel
+                ? 'border-amber-400 bg-amber-500/20 text-amber-300'
+                : 'border-slate-700/80 bg-slate-900/90 text-slate-200 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Otwórz panel szybkiej zmiany podłóg, ścian, mebli i światła"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Szybki Remont</span>
+          </button>
         </div>
 
         {/* View Angles Quick Switcher & Showcase button */}
@@ -1496,6 +1984,193 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
         </div>
 
       </div>
+
+      {/* Szybki Remont w 3D - Floating Remodel Drawer */}
+      {showQuickRemodel && (
+        <div className="absolute bottom-20 left-4 right-4 z-40 pointer-events-auto rounded-3xl border border-slate-700/80 bg-slate-950/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-3 max-h-[320px] overflow-y-auto">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                Szybki Remont w 3D — Natychmiastowa Metamorfoza
+              </h4>
+            </div>
+            
+            {/* Category Tabs */}
+            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+              <button
+                onClick={() => setQuickRemodelTab('floors')}
+                className={`px-3 py-1 rounded-lg font-medium transition ${
+                  quickRemodelTab === 'floors'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Posadzka ({FLOOR_PRESETS.length})
+              </button>
+              <button
+                onClick={() => setQuickRemodelTab('walls')}
+                className={`px-3 py-1 rounded-lg font-medium transition ${
+                  quickRemodelTab === 'walls'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Ściany ({WALL_PRESETS.length})
+              </button>
+              <button
+                onClick={() => setQuickRemodelTab('furniture')}
+                className={`px-3 py-1 rounded-lg font-medium transition ${
+                  quickRemodelTab === 'furniture'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                + Mebel 3D ({QUICK_FURNITURE_ITEMS.length})
+              </button>
+              <button
+                onClick={() => setQuickRemodelTab('light')}
+                className={`px-3 py-1 rounded-lg font-medium transition ${
+                  quickRemodelTab === 'light'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Światło
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowQuickRemodel(false)}
+              className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              title="Zamknij panel szybkiego remontu"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Tab 1: Posadzka */}
+          {quickRemodelTab === 'floors' && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              {FLOOR_PRESETS.map((p) => {
+                const isSelected = room.design.floorTexture === p.floorTexture || room.design.floorType === p.floorType;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleSelectFloorPreset(p)}
+                    className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
+                      isSelected
+                        ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
+                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                    }`}
+                  >
+                    <div
+                      className="w-10 h-10 rounded-xl border border-white/20 mb-2 shadow-inner"
+                      style={{ backgroundColor: p.previewColor }}
+                    />
+                    <span className="text-xs font-bold text-white leading-tight">{p.name}</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">{p.desc}</span>
+                    {isSelected && (
+                      <span className="mt-1 flex items-center gap-1 text-[10px] text-teal-400 font-semibold">
+                        <Check className="w-3 h-3" /> Aktywna
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tab 2: Ściany */}
+          {quickRemodelTab === 'walls' && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2.5">
+              {WALL_PRESETS.map((w) => {
+                const isSelected = room.design.wallTexture === w.wallTexture || room.design.wallType === w.wallType;
+                return (
+                  <button
+                    key={w.id}
+                    onClick={() => handleSelectWallPreset(w)}
+                    className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
+                      isSelected
+                        ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
+                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                    }`}
+                  >
+                    <div
+                      className="w-10 h-10 rounded-xl border border-white/20 mb-2 shadow-inner"
+                      style={{ backgroundColor: w.previewColor }}
+                    />
+                    <span className="text-xs font-bold text-white leading-tight">{w.name}</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">{w.desc}</span>
+                    {isSelected && (
+                      <span className="mt-1 flex items-center gap-1 text-[10px] text-teal-400 font-semibold">
+                        <Check className="w-3 h-3" /> Aktywna
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tab 3: Meble 3D */}
+          {quickRemodelTab === 'furniture' && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
+              {QUICK_FURNITURE_ITEMS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => handleQuickAddFurniture(f)}
+                  className="flex flex-col items-center p-2.5 rounded-2xl border border-slate-800 bg-slate-900/60 hover:border-teal-500/60 hover:bg-teal-950/20 text-center transition active:scale-95 group"
+                >
+                  <div
+                    className="w-10 h-10 rounded-xl border border-white/20 mb-2 flex items-center justify-center shadow-inner group-hover:scale-105 transition"
+                    style={{ backgroundColor: f.color }}
+                  >
+                    <Armchair className="w-5 h-5 text-white/80" />
+                  </div>
+                  <span className="text-xs font-bold text-white leading-tight">{f.name}</span>
+                  <span className="text-[10px] text-teal-400 mt-1 font-medium">+ Wstaw</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Tab 4: Światło */}
+          {quickRemodelTab === 'light' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { k: 2700, name: 'Ciepłe Przytulne (2700K)', desc: 'Idealne do salonu i sypialni, relaksująca złota barwa' },
+                { k: 4000, name: 'Neutralne Dzienne (4000K)', desc: 'Standard do pracy, kuchni i łazienki, naturalne oddawanie barw' },
+                { k: 6000, name: 'Chłodne Nowoczesne (6000K)', desc: 'Loftowy, nowoczesny styl, mocny kontrast detali' },
+              ].map((lt) => {
+                const isSelected = (room.design.lightingTempK || 4000) === lt.k;
+                return (
+                  <button
+                    key={lt.k}
+                    onClick={() => handleSelectLightTemp(lt.k)}
+                    className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left transition active:scale-95 ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-950/40 ring-2 ring-amber-400/30'
+                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                      <Lightbulb className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>{lt.name}</span>
+                        {isSelected && <span className="text-amber-400 text-[10px] font-mono">● Aktywne</span>}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{lt.desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bottom Floating Toolbar: Lighting & Architectural Toggles */}
       <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 pointer-events-none">

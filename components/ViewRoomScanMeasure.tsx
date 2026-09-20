@@ -323,6 +323,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             onUpdateRoomDesign={onUpdateRoomDesign}
             onUpdateFurniture={onUpdateFurniture}
             onDeleteFurniture={onDeleteFurniture}
+            onUpdateRoomPhoto={(photoUrl) => onUpdateRoomPhoto?.(room.id, photoUrl)}
           />
 
           {/* Quick Dimensions & Geometry Sync Bar */}

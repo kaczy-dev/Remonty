@@ -577,6 +577,7 @@ export default function HomePage() {
             }}
             onAddExpenseFromMaterial={handleAddExpenseFromMaterial}
             onDeleteMaterial={handleDeleteMaterial}
+            onUpdateRoomPhoto={handleUpdateRoomPhoto}
           />
         );
 

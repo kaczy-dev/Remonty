@@ -55,6 +55,7 @@ interface ViewDesignMaterialsProps {
   onConsultAI?: (prompt: string) => void;
   onAddExpenseFromMaterial?: (material: MaterialCalculation) => void;
   onDeleteMaterial?: (materialId: string) => void;
+  onUpdateRoomPhoto?: (roomId: string, photoUrl: string) => void;
 }
 
 export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
@@ -67,6 +68,7 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
   onConsultAI,
   onAddExpenseFromMaterial,
   onDeleteMaterial,
+  onUpdateRoomPhoto,
 }) => {
   const [activeTab, setActiveTab] = useState<'design' | 'materials' | 'shopping'>('design');
   const [previewMode, setPreviewMode] = useState<'3d' | 'flat'>('3d');
@@ -439,6 +441,7 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                   room={room}
                   onUpdateRoomDesign={onUpdateRoomDesign}
                   onUpdateFurniture={onUpdateFurniture}
+                  onUpdateRoomPhoto={(photoUrl) => onUpdateRoomPhoto?.(room.id, photoUrl)}
                   className="border-slate-700/80 shadow-inner"
                 />
               </div>
