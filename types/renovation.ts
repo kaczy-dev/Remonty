@@ -138,6 +138,10 @@ export interface MaterialCalculation {
   purchased: boolean;
   storeUrl?: string;
   brandProduct?: string;
+  storeName?: string;
+  packageSize?: number;
+  packagesCount?: number;
+  priority?: 'must_have' | 'standard' | 'optional';
 }
 
 export type ExpenseCategory = 

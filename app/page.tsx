@@ -386,6 +386,44 @@ export default function HomePage() {
     });
   }, [project, updateProject]);
 
+  const handleDeleteMaterial = useCallback((materialId: string) => {
+    updateProject({
+      ...project,
+      materials: project.materials.filter((m) => m.id !== materialId),
+    });
+    showToast('Usunięto pozycję materiałową', { type: 'info' });
+  }, [project, updateProject, showToast]);
+
+  const handleAddExpenseFromMaterial = useCallback((mat: MaterialCalculation) => {
+    const newExpense: Expense = {
+      id: `exp-mat-${Date.now()}`,
+      roomId: mat.roomId,
+      title: mat.name,
+      amount: mat.totalPrice,
+      category: 'Materiały budowlane',
+      date: new Date().toISOString().split('T')[0],
+      paid: true,
+      paymentMethod: 'Karta / Przelew',
+      receiptNote: `Zakupiono w: ${mat.storeName || 'Market budowlany'}. ${mat.formulaExplanation}`,
+    };
+
+    const updatedMaterials = project.materials.map((m) => {
+      if (m.id !== mat.id) return m;
+      return { ...m, purchased: true };
+    });
+
+    updateProject({
+      ...project,
+      materials: updatedMaterials,
+      expenses: [newExpense, ...project.expenses],
+    });
+
+    showToast(`Dodano wydatek: ${mat.name}`, {
+      description: `Kwota: ${mat.totalPrice.toFixed(2)} PLN zapisana w budżecie`,
+      type: 'success',
+    });
+  }, [project, updateProject, showToast]);
+
   // Schedule & Tasks handlers
   const handleUpdateStageProgress = useCallback((stageId: string, progress: number) => {
     updateProject({
@@ -537,6 +575,8 @@ export default function HomePage() {
               setAiPrefilledPrompt(prompt);
               setIsAIModalOpen(true);
             }}
+            onAddExpenseFromMaterial={handleAddExpenseFromMaterial}
+            onDeleteMaterial={handleDeleteMaterial}
           />
         );
 

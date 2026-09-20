@@ -17,9 +17,33 @@ import {
   Percent,
   Check,
   RefreshCw,
-  Info
+  Info,
+  Copy,
+  Download,
+  Share2,
+  DollarSign,
+  Store,
+  Tag,
+  Trash2,
+  ArrowRight,
+  Wrench,
+  CheckSquare,
+  ShieldCheck,
+  Paintbrush
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
+import {
+  calculateTilePackage,
+  calculateFlooringPackage,
+  calculateWaterproofingPackage,
+  calculatePlasterAndPaintPackage,
+  calculateLevelingCompoundPackage,
+  formatShoppingListForClipboard,
+  groupMaterialsByStore,
+  TileLayoutPattern,
+  getWasteMarginForPattern
+} from '@/lib/material-calculator';
+import { generateMaterialsCSV } from '@/lib/report-generator';
 
 interface ViewDesignMaterialsProps {
   room: Room;
@@ -29,6 +53,8 @@ interface ViewDesignMaterialsProps {
   onUpdateRoomDesign: (roomId: string, newDesign: Room['design']) => void;
   onUpdateFurniture?: (roomId: string, furniture: Room['furniture']) => void;
   onConsultAI?: (prompt: string) => void;
+  onAddExpenseFromMaterial?: (material: MaterialCalculation) => void;
+  onDeleteMaterial?: (materialId: string) => void;
 }
 
 export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
@@ -39,6 +65,8 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
   onUpdateRoomDesign,
   onUpdateFurniture,
   onConsultAI,
+  onAddExpenseFromMaterial,
+  onDeleteMaterial,
 }) => {
   const [activeTab, setActiveTab] = useState<'design' | 'materials' | 'shopping'>('design');
   const [previewMode, setPreviewMode] = useState<'3d' | 'flat'>('3d');
@@ -47,14 +75,31 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
   // Waste Calculation Engine State (e.g. +10% waste margin based on room dimensions)
   const [wasteMarginPercent, setWasteMarginPercent] = useState<number>(10);
   const [autoWasteNotice, setAutoWasteNotice] = useState<string | null>(null);
+  const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
 
-  // New material form state
+  // Advanced material calculator presets state
+  const [calcPreset, setCalcPreset] = useState<'tiling' | 'flooring' | 'waterproofing' | 'paint' | 'leveling'>('tiling');
+  const [tileWidth, setTileWidth] = useState<number>(60);
+  const [tileHeight, setTileHeight] = useState<number>(60);
+  const [tilePattern, setTilePattern] = useState<TileLayoutPattern>('straight');
+  const [includeBathroomWalls, setIncludeBathroomWalls] = useState<boolean>(true);
+
+  const [flooringType, setFlooringType] = useState<'panels' | 'vinyl' | 'wood'>('vinyl');
+  const [flooringPattern, setFlooringPattern] = useState<TileLayoutPattern>('straight');
+
+  const [levelingThicknessMm, setLevelingThicknessMm] = useState<number>(10);
+
+  // Store filter in Shopping List
+  const [storeFilter, setStoreFilter] = useState<string>('all');
+
+  // New custom material form state
   const [newMatName, setNewMatName] = useState('');
   const [newMatCategory, setNewMatCategory] = useState<MaterialCalculation['category']>('podłogi');
   const [newMatBaseQuantity, setNewMatBaseQuantity] = useState(10);
   const [newMatWastePercent, setNewMatWastePercent] = useState(10);
   const [newMatUnit, setNewMatUnit] = useState<MaterialCalculation['unit']>('m²');
   const [newMatPrice, setNewMatPrice] = useState(120);
+  const [newMatStore, setNewMatStore] = useState('Castorama / Leroy Merlin');
 
   const roomMaterials = materials.filter((m) => m.roomId === room.id);
   const totalMaterialsCost = roomMaterials.reduce((sum, m) => sum + m.totalPrice, 0);
@@ -81,6 +126,92 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
   const primerLiters = Number(((floorNet + wallNet) * 0.15 * (1 + wasteMarginPercent / 100)).toFixed(1));
   const primerCans = Math.ceil(primerLiters / 5);
 
+  // Specialized trade calculators:
+  const handleApplyTilePackage = () => {
+    const items = calculateTilePackage({
+      roomId: room.id,
+      roomName: room.name,
+      floorArea: room.area,
+      wallArea: includeBathroomWalls ? room.wallArea : 0,
+      tileWidthCm: tileWidth,
+      tileHeightCm: tileHeight,
+      layoutPattern: tilePattern,
+    });
+    items.forEach((item) => onAddMaterial(item));
+    setAutoWasteNotice(`Dodano kompletny pakiet glazurniczy (${items.length} pozycji) dla ${room.name}!`);
+    setTimeout(() => setAutoWasteNotice(null), 4000);
+  };
+
+  const handleApplyFlooringPackage = () => {
+    const items = calculateFlooringPackage({
+      roomId: room.id,
+      roomName: room.name,
+      floorArea: room.area,
+      flooringType,
+      layoutPattern: flooringPattern,
+    });
+    items.forEach((item) => onAddMaterial(item));
+    setAutoWasteNotice(`Dodano pakiet podłogowy (${items.length} pozycje) dla ${room.name}!`);
+    setTimeout(() => setAutoWasteNotice(null), 4000);
+  };
+
+  const handleApplyWaterproofingPackage = () => {
+    const items = calculateWaterproofingPackage({
+      roomId: room.id,
+      roomName: room.name,
+      wetZoneFloorM2: room.area,
+      wetZoneWallM2: Math.min(room.wallArea, 8),
+      cornersLengthM: room.perimeter,
+    });
+    items.forEach((item) => onAddMaterial(item));
+    setAutoWasteNotice(`Dodano pakiet hydroizolacji strefy mokrej (${items.length} pozycje) dla ${room.name}!`);
+    setTimeout(() => setAutoWasteNotice(null), 4000);
+  };
+
+  const handleApplyPlasterPaintPackage = () => {
+    const items = calculatePlasterAndPaintPackage({
+      roomId: room.id,
+      roomName: room.name,
+      wallArea: room.wallArea,
+      ceilingArea: room.area,
+    });
+    items.forEach((item) => onAddMaterial(item));
+    setAutoWasteNotice(`Dodano pakiet gładzi i malowania (${items.length} pozycje) dla ${room.name}!`);
+    setTimeout(() => setAutoWasteNotice(null), 4000);
+  };
+
+  const handleApplyLevelingPackage = () => {
+    const items = calculateLevelingCompoundPackage({
+      roomId: room.id,
+      roomName: room.name,
+      floorArea: room.area,
+      averageThicknessMm: levelingThicknessMm,
+    });
+    items.forEach((item) => onAddMaterial(item));
+    setAutoWasteNotice(`Dodano wylewkę samopoziomującą dla ${room.name}!`);
+    setTimeout(() => setAutoWasteNotice(null), 4000);
+  };
+
+  const handleCopyShoppingList = async () => {
+    const text = formatShoppingListForClipboard(roomMaterials, storeFilter, room.name);
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      setClipboardNotice('Skopiowano sformatowaną listę zakupów do schowka! Możesz wysłać ją majstrowi na WhatsApp lub SMS.');
+      setTimeout(() => setClipboardNotice(null), 5000);
+    }
+  };
+
+  const handleDownloadCSV = () => {
+    const csv = generateMaterialsCSV(roomMaterials, [room]);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Zapotrzebowanie_Materialowe_${room.name.replace(/\s+/g, '_')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleApplyAutoCalculatedMaterials = () => {
     // Generate calculated materials with exact waste explanations
     const floorItem: MaterialCalculation = {
@@ -96,6 +227,9 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
       estimatedUnitPrice: 180,
       totalPrice: floorGross * 180,
       purchased: false,
+      storeName: 'Sklep z Podłogami / Castorama',
+      packageSize: 2.22,
+      packagesCount: floorPacks,
     };
 
     const baseboardItem: MaterialCalculation = {
@@ -111,6 +245,9 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
       estimatedUnitPrice: 32,
       totalPrice: baseboardGross * 32,
       purchased: false,
+      storeName: 'Castorama / Leroy Merlin',
+      packageSize: 2.4,
+      packagesCount: baseboardPieces,
     };
 
     const paintItem: MaterialCalculation = {
@@ -126,6 +263,9 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
       estimatedUnitPrice: 45,
       totalPrice: wallPaintLiters * 45,
       purchased: false,
+      storeName: 'Castorama / Leroy Merlin',
+      packageSize: 2.5,
+      packagesCount: wallPaintCans,
     };
 
     const adhesiveItem: MaterialCalculation = {
@@ -141,6 +281,9 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
       estimatedUnitPrice: 65,
       totalPrice: adhesiveBags * 65,
       purchased: false,
+      storeName: 'Castorama / Leroy Merlin',
+      packageSize: 25,
+      packagesCount: adhesiveBags,
     };
 
     onAddMaterial(floorItem);
@@ -171,6 +314,7 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
       estimatedUnitPrice: newMatPrice,
       totalPrice: finalQty * newMatPrice,
       purchased: false,
+      storeName: newMatStore,
     };
 
     onAddMaterial(item);
@@ -527,6 +671,291 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
             )}
           </div>
 
+          {/* Trade-Specific Calculation Presets Box */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/95 p-5 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Calculator className="w-4 h-4 text-teal-400" />
+                <h4 className="text-sm font-bold text-white">Branżowy Generator Pakietów Materiałowych</h4>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Wybierz branżę i wylicz kompletne zapotrzebowanie z normami zużycia i docinkami:
+              </span>
+            </div>
+
+            {/* Presets Navigation Tabs */}
+            <div className="flex flex-wrap gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCalcPreset('tiling')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  calcPreset === 'tiling'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Boxes className="w-3.5 h-3.5" />
+                <span>Glazurnik & Płytki</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCalcPreset('flooring')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  calcPreset === 'flooring'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Panele / Podłogi</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCalcPreset('waterproofing')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  calcPreset === 'waterproofing'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Hydroizolacja (Mokra)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCalcPreset('paint')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  calcPreset === 'paint'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Paintbrush className="w-3.5 h-3.5" />
+                <span>Gładzie & Farby</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCalcPreset('leveling')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  calcPreset === 'leveling'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                <span>Wylewka Samopoziomująca</span>
+              </button>
+            </div>
+
+            {/* Active Preset Configuration Area */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
+              {calcPreset === 'tiling' && (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200">
+                      Format płytek i technika ułożenia ({room.name}):
+                    </span>
+                    <span className="text-[11px] font-mono text-teal-400">
+                      Zapas docinek: +{getWasteMarginForPattern(tilePattern, tileWidth >= 60 && tileHeight >= 60)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-slate-400 block mb-1">Format płytki (cm):</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          value={tileWidth}
+                          onChange={(e) => setTileWidth(Math.max(10, parseInt(e.target.value) || 10))}
+                          className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-white font-mono text-center"
+                        />
+                        <span className="text-slate-500 font-mono">×</span>
+                        <input
+                          type="number"
+                          value={tileHeight}
+                          onChange={(e) => setTileHeight(Math.max(10, parseInt(e.target.value) || 10))}
+                          className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-white font-mono text-center"
+                        />
+                        <span className="text-slate-500 font-mono text-[10px]">cm</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-slate-400 block mb-1">Układ spoin:</label>
+                      <select
+                        value={tilePattern}
+                        onChange={(e) => setTilePattern(e.target.value as TileLayoutPattern)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-white"
+                      >
+                        <option value="straight">Układ prosty / siatka (+8–12%)</option>
+                        <option value="brick_half">Cegiełka 1/2 (+10–15%)</option>
+                        <option value="brick_third">Cegiełka 1/3 (+10–15%)</option>
+                        <option value="herringbone">Jodełka klasyczna (+15–20%)</option>
+                        <option value="diagonal_45">Karo / po skosie (+18–20%)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 cursor-pointer pb-1.5">
+                        <input
+                          type="checkbox"
+                          checked={includeBathroomWalls}
+                          onChange={(e) => setIncludeBathroomWalls(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-900 text-teal-600 focus:ring-0"
+                        />
+                        <span className="text-slate-300 text-[11px]">
+                          Płytki także na ścianach ({room.wallArea.toFixed(1)} m²)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Generuje: Gres/Płytki (pełne paczki) + Klej elastyczny C2TE + Fuga + Klipsy poziomowania.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyTilePackage}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                    >
+                      <Boxes className="w-3.5 h-3.5" />
+                      <span>Wylicz i dodaj komplet glazurniczy</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {calcPreset === 'flooring' && (
+                <div className="space-y-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-400 block mb-1">Typ podłogi:</label>
+                      <select
+                        value={flooringType}
+                        onChange={(e) => setFlooringType(e.target.value as 'panels' | 'vinyl' | 'wood')}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-white"
+                      >
+                        <option value="vinyl">Panele winylowe SPC z rdzeniem mineralnym</option>
+                        <option value="panels">Panele laminowane AC5 8mm</option>
+                        <option value="wood">Deska warstwowa dębowa</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-slate-400 block mb-1">Układ paneli:</label>
+                      <select
+                        value={flooringPattern}
+                        onChange={(e) => setFlooringPattern(e.target.value as TileLayoutPattern)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-white"
+                      >
+                        <option value="straight">Klasyczny wzdłuż światła (+8%)</option>
+                        <option value="brick_half">Z przesunięciem 1/2 (+10%)</option>
+                        <option value="herringbone">Jodełka klasyczna (+15%)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Generuje: Podłogę z docinkami + Podkład wyciszający o właściwej gęstości (CS).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyFlooringPackage}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Wylicz i dodaj pakiet podłogowy</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {calcPreset === 'waterproofing' && (
+                <div className="space-y-3 text-xs">
+                  <p className="text-slate-300 text-[11px]">
+                    Zabezpieczenie przed zalaniem wg normy ITB: podłoga {room.area.toFixed(1)} m² + strefa prysznica ok. 8 m².
+                  </p>
+                  <div className="flex flex-col sm:flex-row items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Generuje: Folię w płynie (2 warstwy) + Taśmę uszczelniającą narożnikową + Mankiety do rur i odpływu.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyWaterproofingPackage}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Wylicz i dodaj hydroizolację</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {calcPreset === 'paint' && (
+                <div className="space-y-3 text-xs">
+                  <p className="text-slate-300 text-[11px]">
+                    Przygotowanie i wykończenie ścian ({room.wallArea.toFixed(1)} m²) oraz sufitu ({room.area.toFixed(1)} m²).
+                  </p>
+                  <div className="flex flex-col sm:flex-row items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Generuje: Grunt głębokopenetrujący + Gładź polimerową (2 warstwy) + Farbę lateksową (2 warstwy).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyPlasterPaintPackage}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                    >
+                      <Paintbrush className="w-3.5 h-3.5" />
+                      <span>Wylicz i dodaj gładzie oraz farby</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {calcPreset === 'leveling' && (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <label className="text-slate-400 block mb-1">
+                        Średnia grubość wyrównania posadzki ({room.area.toFixed(1)} m²):
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="3"
+                          max="30"
+                          value={levelingThicknessMm}
+                          onChange={(e) => setLevelingThicknessMm(parseInt(e.target.value) || 3)}
+                          className="flex-1"
+                        />
+                        <span className="font-mono font-bold text-teal-400 text-sm w-12 text-right">
+                          {levelingThicknessMm} mm
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Norma: 1.65 kg/m²/mm. Dla {room.area.toFixed(1)} m² potrzeba {Math.ceil((room.area * 1.65 * levelingThicknessMm * 1.05) / 25)} worków po 25kg.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyLevelingPackage}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>Wylicz i dodaj wylewkę</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Header for individual materials */}
           <div className="flex items-center justify-between pt-2">
             <div>
@@ -538,13 +967,24 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                 Pozycje z uwzględnionym naddatkiem technologicznym na ścinki i straty montażowe.
               </p>
             </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-700 transition"
-            >
-              <Plus className="w-3.5 h-3.5 text-teal-400" />
-              <span>Dodaj Własny Materiał</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadCSV}
+                className="flex items-center gap-1.5 rounded-xl bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-700 transition"
+                title="Pobierz plik CSV do Excela"
+              >
+                <Download className="w-3.5 h-3.5 text-teal-400" />
+                <span>Eksportuj CSV</span>
+              </button>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-teal-500 transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Dodaj Materiał</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -555,10 +995,18 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
               >
                 <div>
                   <div className="flex items-start justify-between gap-2">
-                    <span className="rounded-md border border-teal-500/30 bg-teal-950/40 px-2 py-0.5 text-[10px] font-semibold text-teal-300 uppercase">
-                      {mat.category.replace('_', ' ')}
-                    </span>
-                    <span className="font-mono text-sm font-bold text-white">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="rounded-md border border-teal-500/30 bg-teal-950/40 px-2 py-0.5 text-[10px] font-semibold text-teal-300 uppercase">
+                        {mat.category.replace('_', ' ')}
+                      </span>
+                      {mat.storeName && (
+                        <span className="rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300 flex items-center gap-1">
+                          <Store className="w-3 h-3 text-amber-400" />
+                          <span>{mat.storeName}</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-sm font-bold text-white shrink-0">
                       {mat.totalPrice.toFixed(2)} PLN
                     </span>
                   </div>
@@ -583,23 +1031,51 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                   </div>
                 </div>
 
-                {/* Bottom Stats & Action */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
+                {/* Bottom Stats & Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/60 text-xs">
                   <div>
                     <span className="text-slate-400">Do zakupu: </span>
-                    <strong className="text-white font-mono">{mat.finalQuantity} {mat.unit}</strong>
+                    <strong className="text-white font-mono">
+                      {mat.packagesCount ? `${mat.packagesCount} ${mat.unit}` : `${mat.finalQuantity} ${mat.unit}`}
+                    </strong>
                   </div>
-                  <button
-                    onClick={() => onToggleMaterialPurchased(mat.id)}
-                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      mat.purchased
-                        ? 'border border-emerald-500/40 bg-emerald-950/40 text-emerald-300'
-                        : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    {mat.purchased ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Circle className="w-3.5 h-3.5" />}
-                    <span>{mat.purchased ? 'W magazynie' : 'Do kupienia'}</span>
-                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    {onAddExpenseFromMaterial && (
+                      <button
+                        type="button"
+                        onClick={() => onAddExpenseFromMaterial(mat)}
+                        className="flex items-center gap-1 rounded-lg border border-teal-500/30 bg-teal-950/40 px-2 py-1 text-[11px] font-semibold text-teal-300 hover:bg-teal-900/50 transition"
+                        title="Zapisz tę pozycję bezpośrednio do listy wydatków projektu"
+                      >
+                        <DollarSign className="w-3 h-3 text-teal-400" />
+                        <span>Do wydatków</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => onToggleMaterialPurchased(mat.id)}
+                      className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                        mat.purchased
+                          ? 'border border-emerald-500/40 bg-emerald-950/40 text-emerald-300'
+                          : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {mat.purchased ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Circle className="w-3.5 h-3.5" />}
+                      <span>{mat.purchased ? 'Kupione' : 'Kup'}</span>
+                    </button>
+
+                    {onDeleteMaterial && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteMaterial(mat.id)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                        title="Usuń materiał"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -609,55 +1085,202 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
 
       {/* Mode 3: Shopping List & Procurement Checklist */}
       {activeTab === 'shopping' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
                 <ShoppingCart className="w-4 h-4 text-teal-400" />
-                Interaktywna Lista Zakupów (Zakupy w markecie budowlanym)
+                Interaktywna Lista Zakupów Budowlanych
               </h3>
               <p className="text-xs text-slate-400">
-                Zaznaczaj pozycje wrzucane do koszyka w sklepie stacjonarnym lub internetowym.
+                Praktyczna lista na zakupy w marketach budowlanych z podziałem na sklepy i eksportem na WhatsApp.
               </p>
             </div>
-            <span className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-mono text-slate-300">
-              {roomMaterials.filter(m => m.purchased).length} / {roomMaterials.length} kupione
-            </span>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleCopyShoppingList}
+                className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-teal-500 transition active:scale-95"
+                title="Kopiuj czytelną listę do wklejenia na WhatsApp lub SMS"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Kopiuj na WhatsApp / SMS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadCSV}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-700 transition"
+                title="Pobierz plik CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-teal-400" />
+                <span>CSV</span>
+              </button>
+            </div>
           </div>
 
-          <div className="divide-y divide-slate-800 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
-            {roomMaterials.map((mat) => (
-              <div 
-                key={mat.id}
-                onClick={() => onToggleMaterialPurchased(mat.id)}
-                className={`p-4 flex items-center justify-between gap-3 cursor-pointer transition ${
-                  mat.purchased ? 'bg-emerald-950/10 opacity-70' : 'hover:bg-slate-900/60'
+          {/* Toast feedback after copying */}
+          {clipboardNotice && (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 p-3 text-xs text-emerald-300 animate-in fade-in duration-150">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{clipboardNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClipboardNotice(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Procurement Summary Badges & Progress */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <span className="text-[10px] text-slate-400 uppercase block">Stan realizacji</span>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-sm font-bold font-mono text-white">
+                  {roomMaterials.filter(m => m.purchased).length} / {roomMaterials.length} pozycji
+                </span>
+                <span className="text-xs font-mono text-teal-400">
+                  {roomMaterials.length > 0 ? Math.round((roomMaterials.filter(m => m.purchased).length / roomMaterials.length) * 100) : 0}%
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                <div 
+                  className="bg-teal-500 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${roomMaterials.length > 0 ? (roomMaterials.filter(m => m.purchased).length / roomMaterials.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <span className="text-[10px] text-slate-400 uppercase block">Wydatkowano na materiały</span>
+              <div className="text-sm font-bold font-mono text-emerald-400 mt-1">
+                {purchasedMaterialsCost.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+              </div>
+              <span className="text-[10px] text-slate-500 block mt-1">
+                Pozycje oznaczone jako kupione
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <span className="text-[10px] text-slate-400 uppercase block">Szacowany koszt całkowity</span>
+              <div className="text-sm font-bold font-mono text-white mt-1">
+                {totalMaterialsCost.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+              </div>
+              <span className="text-[10px] text-slate-500 block mt-1">
+                Pozostało do wydania: {(totalMaterialsCost - purchasedMaterialsCost).toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+              </span>
+            </div>
+          </div>
+
+          {/* Store Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+            <span className="text-slate-400 text-[11px] font-semibold flex items-center gap-1 shrink-0">
+              <Store className="w-3.5 h-3.5 text-amber-400" />
+              Filtr sklepu:
+            </span>
+            {[
+              { id: 'all', label: `Wszystkie (${roomMaterials.length})` },
+              { id: 'Castorama / Leroy Merlin', label: 'Castorama / Leroy Merlin' },
+              { id: 'Salon Płytek i Ceramiki', label: 'Salon Płytek' },
+              { id: 'Sklep z Podłogami / Castorama', label: 'Podłogi' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setStoreFilter(f.id)}
+                className={`px-3 py-1 rounded-lg font-medium whitespace-nowrap transition border ${
+                  storeFilter === f.id
+                    ? 'border-teal-500 bg-teal-950/60 text-teal-300 font-bold'
+                    : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-1 rounded-md transition ${mat.purchased ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {mat.purchased ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-                  </div>
-                  <div className="min-w-0">
-                    <div className={`text-xs font-semibold truncate ${mat.purchased ? 'line-through text-slate-400' : 'text-slate-100'}`}>
-                      {mat.name}
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Ilość: <strong>{mat.finalQuantity} {mat.unit}</strong> • Cena jedn.: ok. {mat.estimatedUnitPrice} zł
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <div className="text-xs font-mono font-bold text-white">
-                    {mat.totalPrice.toFixed(2)} PLN
-                  </div>
-                  <span className={`text-[10px] font-semibold block ${mat.purchased ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {mat.purchased ? 'Kupione' : 'Brak na stanie'}
-                  </span>
-                </div>
-              </div>
+                {f.label}
+              </button>
             ))}
+          </div>
+
+          {/* Filtered Shopping List */}
+          <div className="divide-y divide-slate-800 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
+            {roomMaterials
+              .filter((m) => storeFilter === 'all' || (m.storeName || 'Castorama / Leroy Merlin') === storeFilter)
+              .map((mat) => (
+                <div 
+                  key={mat.id}
+                  className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
+                    mat.purchased ? 'bg-emerald-950/10' : 'hover:bg-slate-900/60'
+                  }`}
+                >
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => onToggleMaterialPurchased(mat.id)}
+                      className={`p-1 rounded-md transition mt-0.5 sm:mt-0 ${mat.purchased ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
+                      aria-label="Zmień status zakupu"
+                    >
+                      {mat.purchased ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                    </button>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-semibold ${mat.purchased ? 'line-through text-slate-400' : 'text-slate-100'}`}>
+                          {mat.name}
+                        </span>
+                        {mat.storeName && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 border border-slate-800">
+                            {mat.storeName}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        Ilość: <strong className="text-white">{mat.packagesCount ? `${mat.packagesCount} ${mat.unit}` : `${mat.finalQuantity} ${mat.unit}`}</strong>
+                        {mat.packageSize && <span className="text-slate-500"> (à {mat.packageSize})</span>}
+                        {' '}• Cena jedn.: ok. {mat.estimatedUnitPrice} zł
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/60">
+                    <div className="text-left sm:text-right">
+                      <div className="text-xs font-mono font-bold text-white">
+                        {mat.totalPrice.toFixed(2)} PLN
+                      </div>
+                      <span className={`text-[10px] font-semibold block ${mat.purchased ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {mat.purchased ? 'Kupione' : 'Do kupienia'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {onAddExpenseFromMaterial && (
+                        <button
+                          type="button"
+                          onClick={() => onAddExpenseFromMaterial(mat)}
+                          className="flex items-center gap-1 rounded-lg border border-teal-500/40 bg-teal-950/60 px-2.5 py-1 text-xs font-semibold text-teal-300 hover:bg-teal-900/70 transition shadow-xs"
+                          title="Zapisz do wydatków"
+                        >
+                          <DollarSign className="w-3.5 h-3.5 text-teal-400" />
+                          <span className="hidden sm:inline">Wydatek</span>
+                        </button>
+                      )}
+
+                      {onDeleteMaterial && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteMaterial(mat.id)}
+                          className="rounded-lg p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                          title="Usuń materiał"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
       )}
@@ -715,18 +1338,19 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">Jednostka:</label>
+                    <label className="text-xs text-slate-400 block mb-1">Sklep / Market:</label>
                     <select
-                      value={newMatUnit}
-                      onChange={(e) => setNewMatUnit(e.target.value as MaterialCalculation['unit'])}
+                      value={newMatStore}
+                      onChange={(e) => setNewMatStore(e.target.value)}
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-teal-500 focus:outline-hidden"
                     >
-                      <option value="m²">m²</option>
-                      <option value="opak.">opak.</option>
-                      <option value="kg">kg</option>
-                      <option value="l">l</option>
-                      <option value="mb">mb</option>
-                      <option value="szt.">szt.</option>
+                      <option value="Castorama / Leroy Merlin">Castorama / Leroy Merlin</option>
+                      <option value="Salon Płytek i Ceramiki">Salon Płytek i Ceramiki</option>
+                      <option value="Sklep z Podłogami / Castorama">Sklep z Podłogami</option>
+                      <option value="Hurtownia Elektryczna">Hurtownia Elektryczna</option>
+                      <option value="Hurtownia Hydrauliczna">Hurtownia Hydrauliczna</option>
+                      <option value="Internet / Allegro">Internet / Allegro</option>
+                      <option value="Inne">Inne</option>
                     </select>
                   </div>
                 </div>
@@ -756,16 +1380,32 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">Cena jedn. (PLN):</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      value={newMatPrice}
-                      onChange={(e) => setNewMatPrice(parseFloat(e.target.value) || 0)}
+                    <label className="text-xs text-slate-400 block mb-1">Jednostka:</label>
+                    <select
+                      value={newMatUnit}
+                      onChange={(e) => setNewMatUnit(e.target.value as MaterialCalculation['unit'])}
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-teal-500 focus:outline-hidden"
-                    />
+                    >
+                      <option value="m²">m²</option>
+                      <option value="opak.">opak.</option>
+                      <option value="kg">kg</option>
+                      <option value="l">l</option>
+                      <option value="mb">mb</option>
+                      <option value="szt.">szt.</option>
+                    </select>
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Cena jedn. szacunkowa (PLN):</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={newMatPrice}
+                    onChange={(e) => setNewMatPrice(parseFloat(e.target.value) || 0)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-teal-500 focus:outline-hidden"
+                  />
                 </div>
 
                 {/* Live waste calculation info */}
