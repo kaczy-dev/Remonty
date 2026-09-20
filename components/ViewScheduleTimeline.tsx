@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { RenovationStage, NotificationItem, RenovationProject } from '@/types/renovation';
+import { GanttChart } from '@/components/GanttChart';
 import { 
   CalendarDays, 
   Clock, 
@@ -14,7 +15,9 @@ import {
   Plus, 
   ShieldAlert, 
   ChevronRight,
-  Flame
+  Flame,
+  BarChart3,
+  List
 } from 'lucide-react';
 
 interface ViewScheduleTimelineProps {
@@ -40,7 +43,7 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
   onDismissNotification,
 }) => {
   const [selectedStageId, setSelectedStageId] = useState<string>(project.stages[3]?.id || project.stages[0]?.id);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'notifications'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'gantt' | 'notifications'>('gantt');
   const [newNotifTitle, setNewNotifTitle] = useState('');
   const [newNotifMsg, setNewNotifMsg] = useState('');
   const [newNotifPriority, setNewNotifPriority] = useState<NotificationItem['priority']>('medium');
@@ -95,6 +98,18 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
             <button
+              id="tab-gantt-chart-btn"
+              onClick={() => setActiveTab('gantt')}
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+                activeTab === 'gantt'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Wykres Gantta (Oś Czasu)</span>
+            </button>
+            <button
               id="tab-timeline-gantt-btn"
               onClick={() => setActiveTab('timeline')}
               className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
@@ -103,8 +118,8 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <CalendarDays className="w-3.5 h-3.5" />
-              <span>Harmonogram i Etapy Gantta</span>
+              <List className="w-3.5 h-3.5" />
+              <span>Szczegóły Etapów & BHP</span>
             </button>
             <button
               id="tab-notifications-center-btn"
@@ -116,7 +131,7 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
               }`}
             >
               <Bell className="w-3.5 h-3.5" />
-              <span>Centrum Powiadomień ({project.notifications.length})</span>
+              <span>Alerty ({project.notifications.length})</span>
             </button>
           </div>
         </div>
@@ -130,7 +145,21 @@ export const ViewScheduleTimeline: React.FC<ViewScheduleTimelineProps> = ({
         </div>
       </div>
 
-      {/* Mode 1: Timeline Gantt & Technological Curing Engine */}
+      {/* Mode 1: Interactive Full Gantt Chart View */}
+      {activeTab === 'gantt' && (
+        <div className="space-y-4">
+          <GanttChart
+            project={project}
+            selectedStageId={selectedStageId}
+            onSelectStage={(id) => {
+              setSelectedStageId(id);
+              setActiveTab('timeline');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Mode 2: Timeline Stages & Technological Curing Engine */}
       {activeTab === 'timeline' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           

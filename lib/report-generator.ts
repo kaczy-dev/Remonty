@@ -1,10 +1,12 @@
-import { RenovationProject, MaterialCalculation, Expense, Room } from '@/types/renovation';
+import { RenovationProject, MaterialCalculation, Expense, Room, Contractor } from '@/types/renovation';
 
 export interface ReportConfig {
   roomId?: string; // 'all' or specific room ID
   includeSummary: boolean;
   includeMaterials: boolean;
   includeLabor: boolean;
+  includeContractors: boolean;
+  includeGantt: boolean;
   includeExpenses: boolean;
   includeQAChecklist: boolean;
   contractorName?: string;
@@ -25,12 +27,14 @@ export interface ReportSummaryData {
   contingencyAmount: number;
   totalMaterialsEstimated: number;
   totalLaborEstimated: number;
+  totalContractorsAgreed: number;
   totalSpentActual: number;
   remainingBudget: number;
   materialsCount: number;
   expensesCount: number;
   qaItemsCount: number;
   qaPassedCount: number;
+  contractorsCount: number;
 }
 
 /**
@@ -64,6 +68,7 @@ export function getReportSummaryData(project: RenovationProject, selectedRoomId?
 
   const totalMaterialsEstimated = materialsToInclude.reduce((sum, m) => sum + m.totalPrice, 0);
   const totalLaborEstimated = stagesToInclude.reduce((sum, s) => sum + s.contractorCostEstimate, 0);
+  const totalContractorsAgreed = (project.contractors || []).reduce((sum, c) => sum + c.agreedTotalCost, 0);
   const totalSpentActual = expensesToInclude.reduce((sum, e) => sum + e.amount, 0);
 
   const contingencyAmount = Math.round((project.totalPlannedBudget * project.contingencyReservePercent) / 100);
@@ -89,12 +94,14 @@ export function getReportSummaryData(project: RenovationProject, selectedRoomId?
     contingencyAmount,
     totalMaterialsEstimated: Number(totalMaterialsEstimated.toFixed(2)),
     totalLaborEstimated: Number(totalLaborEstimated.toFixed(2)),
+    totalContractorsAgreed: Number(totalContractorsAgreed.toFixed(2)),
     totalSpentActual: Number(totalSpentActual.toFixed(2)),
     remainingBudget: Number(remainingBudget.toFixed(2)),
     materialsCount: materialsToInclude.length,
     expensesCount: expensesToInclude.length,
     qaItemsCount: qaToInclude.length,
     qaPassedCount,
+    contractorsCount: (project.contractors || []).length,
   };
 }
 
@@ -134,7 +141,6 @@ export function generateMaterialsCSV(materials: MaterialCalculation[], rooms: Ro
     `"${(m.formulaExplanation || '').replace(/"/g, '""')}"`,
   ]);
 
-  // Excel delimiter in PL is usually semicolon or comma. Semicolon with UTF-8 BOM is most reliable for Excel PL
   return '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\r\n');
 }
 
@@ -172,7 +178,45 @@ export function generateExpensesCSV(expenses: Expense[], rooms: Room[]): string 
 }
 
 /**
- * Generates a full master cost estimate CSV combining materials, labor, and budget summary
+ * Generates an Excel-friendly CSV for contractors register and settlements
+ */
+export function generateContractorsCSV(contractors: Contractor[]): string {
+  const headers = [
+    'Lp.',
+    'Wykonawca / Nazwa',
+    'Firma / NIP',
+    'Branża',
+    'Telefon',
+    'Status',
+    'Umówiona Kwota (PLN)',
+    'Wypłacone Łącznie (PLN)',
+    'Pozostało do Zapłaty (PLN)',
+    'Liczba Płatności',
+  ];
+
+  const rows = (contractors || []).map((c, idx) => {
+    const totalPaid = (c.payments || []).reduce((sum, p) => sum + p.amount, 0);
+    const balance = Math.max(0, c.agreedTotalCost - totalPaid);
+
+    return [
+      idx + 1,
+      `"${c.name.replace(/"/g, '""')}"`,
+      `"${(c.companyName || c.nip || 'Osoba fizyczna').replace(/"/g, '""')}"`,
+      `"${c.trade}"`,
+      `"${c.phone}"`,
+      `"${c.status}"`,
+      c.agreedTotalCost.toFixed(2).replace('.', ','),
+      totalPaid.toFixed(2).replace('.', ','),
+      balance.toFixed(2).replace('.', ','),
+      (c.payments || []).length,
+    ];
+  });
+
+  return '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\r\n');
+}
+
+/**
+ * Generates a full master cost estimate CSV combining materials, labor, contractors, and budget summary
  */
 export function generateFullCostEstimateCSV(project: RenovationProject): string {
   const summary = getReportSummaryData(project);
@@ -189,6 +233,7 @@ export function generateFullCostEstimateCSV(project: RenovationProject): string 
     `Rezerwa bezpieczeństwa (${summary.contingencyReservePercent}%):;${summary.contingencyAmount.toFixed(2).replace('.', ',')} PLN`,
     `Suma szacowana materiałów:;${summary.totalMaterialsEstimated.toFixed(2).replace('.', ',')} PLN`,
     `Suma szacowana robocizny:;${summary.totalLaborEstimated.toFixed(2).replace('.', ',')} PLN`,
+    `Suma umów z wykonawcami:;${summary.totalContractorsAgreed.toFixed(2).replace('.', ',')} PLN`,
     `Rzeczywiste wydatki poniesione:;${summary.totalSpentActual.toFixed(2).replace('.', ',')} PLN`,
     `Pozostały budżet:;${summary.remainingBudget.toFixed(2).replace('.', ',')} PLN`,
     ``,
@@ -225,6 +270,25 @@ export function generateFullCostEstimateCSV(project: RenovationProject): string 
       `${s.progressPercent}%`,
     ].join(';'));
   });
+
+  if (project.contractors && project.contractors.length > 0) {
+    lines.push('');
+    lines.push('--- 3. REJESTR WYKONAWCÓW I PŁATNOŚCI ---');
+    lines.push('Lp.;Wykonawca;Branża;Status;Kwota Umowna PLN;Wypłacono PLN;Pozostało PLN');
+    project.contractors.forEach((c, idx) => {
+      const totalPaid = (c.payments || []).reduce((sum, p) => sum + p.amount, 0);
+      const remaining = Math.max(0, c.agreedTotalCost - totalPaid);
+      lines.push([
+        idx + 1,
+        `"${c.name.replace(/"/g, '""')}"`,
+        `"${c.trade}"`,
+        `"${c.status}"`,
+        c.agreedTotalCost.toFixed(2).replace('.', ','),
+        totalPaid.toFixed(2).replace('.', ','),
+        remaining.toFixed(2).replace('.', ','),
+      ].join(';'));
+    });
+  }
 
   return '\uFEFF' + lines.join('\r\n');
 }

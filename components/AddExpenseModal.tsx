@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Expense, ExpenseCategory, Room } from '@/types/renovation';
 import { X, Wallet, Camera } from 'lucide-react';
@@ -53,6 +53,17 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setReceiptPreviewUrl(null);
     }
   };
+
+  const receiptPreviewUrlRef = useRef<string | null>(null);
+  receiptPreviewUrlRef.current = receiptPreviewUrl;
+
+  useEffect(() => {
+    return () => {
+      if (receiptPreviewUrlRef.current) {
+        URL.revokeObjectURL(receiptPreviewUrlRef.current);
+      }
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (!isOpen) return;

@@ -7,9 +7,11 @@ import {
   getReportSummaryData,
   generateMaterialsCSV,
   generateExpensesCSV,
+  generateContractorsCSV,
   generateFullCostEstimateCSV,
   downloadFile,
 } from '@/lib/report-generator';
+import { calculateGanttTimeline } from '@/lib/gantt-helper';
 import {
   FileSpreadsheet,
   Printer,
@@ -24,6 +26,10 @@ import {
   DollarSign,
   Layers,
   Sparkles,
+  Users,
+  BarChart3,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ReportGeneratorModalProps {
@@ -41,6 +47,8 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
   const [includeSummary, setIncludeSummary] = useState(true);
   const [includeMaterials, setIncludeMaterials] = useState(true);
   const [includeLabor, setIncludeLabor] = useState(true);
+  const [includeGantt, setIncludeGantt] = useState(true);
+  const [includeContractors, setIncludeContractors] = useState(true);
   const [includeExpenses, setIncludeExpenses] = useState(true);
   const [includeQA, setIncludeQA] = useState(true);
 
@@ -71,6 +79,12 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
 
   const roomMap = new Map(project.rooms.map((r) => [r.id, r.name]));
 
+  const ganttMeta = calculateGanttTimeline(
+    filteredStages,
+    project.startDate,
+    project.targetEndDate
+  );
+
   const handlePrint = () => {
     window.print();
   };
@@ -91,6 +105,12 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
     const csv = generateExpensesCSV(filteredExpenses, project.rooms);
     const dateStr = new Date().toISOString().slice(0, 10);
     downloadFile(csv, `rejestr-wydatkow-${dateStr}.csv`);
+  };
+
+  const handleDownloadContractorsCSV = () => {
+    const csv = generateContractorsCSV(project.contractors || []);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    downloadFile(csv, `rozliczenie-ekip-${dateStr}.csv`);
   };
 
   return (
@@ -123,7 +143,7 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Kompletna dokumentacja wykonawcza, metraże, naddatki materiałowe i protokół odbioru z normami PN-EN
+                    Rozszerzona dokumentacja wykonawcza, harmonogram Gantta, rozliczenia ekip, materiały i protokół PN-EN
                   </p>
                 </div>
               </div>
@@ -185,6 +205,15 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                   </button>
 
                   <button
+                    onClick={handleDownloadContractorsCSV}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white transition"
+                    title="Pobierz zestawienie wykonawców i rozliczeń finansowych"
+                  >
+                    <Users className="w-3 h-3 text-sky-400" />
+                    <span className="hidden sm:inline">Ekipy CSV</span>
+                  </button>
+
+                  <button
                     onClick={handleDownloadExpensesCSV}
                     className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white transition"
                     title="Pobierz rejestr wydatków i paragonów"
@@ -222,11 +251,31 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                 <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={includeGantt}
+                    onChange={(e) => setIncludeGantt(e.target.checked)}
+                    className="rounded-sm border-slate-700 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Wykres Gantta</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
                     checked={includeLabor}
                     onChange={(e) => setIncludeLabor(e.target.checked)}
                     className="rounded-sm border-slate-700 text-teal-600 focus:ring-teal-500"
                   />
                   <span>Robocizna & Etapy</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeContractors}
+                    onChange={(e) => setIncludeContractors(e.target.checked)}
+                    className="rounded-sm border-slate-700 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Ekipy & Rozliczenia</span>
                 </label>
 
                 <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
@@ -382,7 +431,7 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
 
                     {filteredMaterials.length === 0 ? (
                       <div className="text-[11px] text-slate-500 italic p-2 bg-slate-50 rounded-lg">
-                        Brak skalkulowanych materiałów dla wybranego zakresu. Skalkuluj materiały w zakładce Projekt & Materiały.
+                        Brak skalkulowanych materiałów dla wybranego zakresu.
                       </div>
                     ) : (
                       <div className="overflow-x-auto mb-2">
@@ -441,11 +490,53 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                   </div>
                 )}
 
-                {/* 3. Labor & Stages Section */}
+                {/* 3. Gantt Chart Visual Export */}
+                {includeGantt && (
+                  <div className="mb-6 print-avoid-break">
+                    <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wider border-b border-teal-500/30 pb-1 mb-3 flex items-center justify-between">
+                      <span>3. Harmonogram Osi Czasu Gantta ({ganttMeta.projectStart} do {ganttMeta.projectEnd})</span>
+                      <span className="text-[10px] text-slate-500 font-normal">Łączny czas: {ganttMeta.totalDays} dni</span>
+                    </h4>
+
+                    <div className="border border-slate-300 rounded-lg p-3 bg-slate-50 space-y-2">
+                      <div className="grid grid-cols-12 text-[10px] font-bold text-slate-600 border-b border-slate-300 pb-1">
+                        <div className="col-span-5">Etap prac / branża</div>
+                        <div className="col-span-7 flex justify-between font-mono">
+                          {ganttMeta.timeAxisMarkers.map((m, i) => (
+                            <span key={i}>{m.label}</span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {ganttMeta.bars.map((bar) => (
+                        <div key={bar.id} className="grid grid-cols-12 gap-1 items-center text-[10px]">
+                          <div className="col-span-5 truncate pr-2">
+                            <span className="font-semibold text-slate-800">{bar.name}</span>
+                            <span className="text-slate-500 block text-[9px] font-mono">{bar.startDate} → {bar.endDate} ({bar.durationDays}d)</span>
+                          </div>
+                          <div className="col-span-7 relative h-5 bg-slate-200 rounded-sm overflow-hidden flex items-center">
+                            <div
+                              className="absolute h-4 rounded-xs bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center px-1"
+                              style={{
+                                left: `${bar.leftPercent}%`,
+                                width: `${bar.widthPercent}%`,
+                                minWidth: '20px',
+                              }}
+                            >
+                              {bar.progressPercent}%
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Labor & Stages Section */}
                 {includeLabor && (
                   <div className="mb-6 print-avoid-break">
                     <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wider border-b border-teal-500/30 pb-1 mb-3">
-                      3. Harmonogram Prac i Szacunek Robocizny
+                      4. Szczegółowy Szacunek Robocizny i Etapów Prac
                     </h4>
 
                     {filteredStages.length === 0 ? (
@@ -496,7 +587,79 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                   </div>
                 )}
 
-                {/* 4. Financial Summary & Contingency Box */}
+                {/* 5. Contractors & Settlements Section */}
+                {includeContractors && project.contractors && project.contractors.length > 0 && (
+                  <div className="mb-6 print-avoid-break">
+                    <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wider border-b border-teal-500/30 pb-1 mb-3">
+                      5. Rejestr Wykonawców i Rozliczenia Finansowe
+                    </h4>
+                    <div className="overflow-x-auto mb-2">
+                      <table className="w-full text-left border-collapse text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-300 text-slate-700">
+                            <th className="py-1.5 px-2 font-semibold">Wykonawca</th>
+                            <th className="py-1.5 px-2 font-semibold">Branża</th>
+                            <th className="py-1.5 px-2 font-semibold">Status</th>
+                            <th className="py-1.5 px-2 font-semibold text-right">Kwota Umowna</th>
+                            <th className="py-1.5 px-2 font-semibold text-right">Wypłacono</th>
+                            <th className="py-1.5 px-2 font-semibold text-right">Pozostało</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {project.contractors.map((c) => {
+                            const totalPaid = (c.payments || []).reduce((sum, p) => sum + p.amount, 0);
+                            const balance = Math.max(0, c.agreedTotalCost - totalPaid);
+                            return (
+                              <tr key={c.id}>
+                                <td className="py-1.5 px-2 font-semibold text-slate-900">{c.name}</td>
+                                <td className="py-1.5 px-2 text-slate-600">{c.trade}</td>
+                                <td className="py-1.5 px-2 text-slate-600 capitalize">{c.status.replace('_', ' ')}</td>
+                                <td className="py-1.5 px-2 text-right font-mono font-bold">{c.agreedTotalCost.toFixed(2)} zł</td>
+                                <td className="py-1.5 px-2 text-right font-mono text-teal-800">{totalPaid.toFixed(2)} zł</td>
+                                <td className="py-1.5 px-2 text-right font-mono text-amber-800 font-bold">{balance.toFixed(2)} zł</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. Expenses Register Section */}
+                {includeExpenses && filteredExpenses.length > 0 && (
+                  <div className="mb-6 print-avoid-break">
+                    <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wider border-b border-teal-500/30 pb-1 mb-3">
+                      6. Rejestr Wydatków Rzeczywistych i Paragonów
+                    </h4>
+                    <div className="overflow-x-auto mb-2">
+                      <table className="w-full text-left border-collapse text-[10px]">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-300 text-slate-700">
+                            <th className="py-1 px-2 font-semibold">Data</th>
+                            <th className="py-1 px-2 font-semibold">Pozycja</th>
+                            <th className="py-1 px-2 font-semibold">Kategoria</th>
+                            <th className="py-1 px-2 font-semibold">Płatność</th>
+                            <th className="py-1 px-2 font-semibold text-right">Kwota PLN</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {filteredExpenses.map((exp) => (
+                            <tr key={exp.id}>
+                              <td className="py-1 px-2 font-mono text-slate-600">{exp.date}</td>
+                              <td className="py-1 px-2 font-medium text-slate-900">{exp.title}</td>
+                              <td className="py-1 px-2 text-slate-600">{exp.category}</td>
+                              <td className="py-1 px-2 text-slate-600">{exp.paymentMethod}</td>
+                              <td className="py-1 px-2 text-right font-mono font-bold text-slate-900">{exp.amount.toFixed(2)} zł</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. Financial Summary & Contingency Box */}
                 <div className="mb-6 print-avoid-break bg-teal-50/60 border border-teal-200 rounded-xl p-4">
                   <h4 className="text-xs font-bold text-teal-950 uppercase tracking-wider mb-2">
                     Zbiorcze Podsumowanie Kosztorysowe i Rezerwa Bezpieczeństwa
@@ -521,11 +684,11 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                   </div>
                 </div>
 
-                {/* 5. QA & Technical Acceptance Protocol */}
+                {/* 8. QA & Technical Acceptance Protocol */}
                 {includeQA && (
                   <div className="mb-8 print-avoid-break">
                     <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wider border-b border-teal-500/30 pb-1 mb-3">
-                      5. Protokół Odbioru Technicznego i Normy PN-EN / ITB
+                      8. Protokół Odbioru Technicznego i Normy PN-EN / ITB
                     </h4>
 
                     {filteredQA.length === 0 ? (
@@ -567,7 +730,7 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                   </div>
                 )}
 
-                {/* 6. Legal Signatures Section */}
+                {/* Legal Signatures Section */}
                 <div className="pt-6 border-t-2 border-slate-300 print-avoid-break mt-6">
                   <div className="text-[11px] text-slate-600 mb-6 italic">
                     Powyższy kosztorys i zestawienie sporządzono na podstawie inwentaryzacji lokalu, norm budowlanych PN-EN oraz wytycznych ITB. Wszelkie zmiany materiałowe lub zakresu prac wymagają pisemnej akceptacji stron.

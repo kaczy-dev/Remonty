@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { ToastProvider } from '@/components/ToastProvider';
 
 export const viewport: Viewport = {
   themeColor: '#0f172a',
@@ -40,7 +41,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pl" className="dark">
       <body className="bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-teal-500/25 selection:text-teal-200" suppressHydrationWarning>
-        {children}
+        <ToastProvider>
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

@@ -16,7 +16,13 @@ import {
   StageStatus,
   WorkLogEntry
 } from '@/types/renovation';
-import { loadOrMigrateInitialProject, saveProjectToDB, getAllProjectsFromDB, deleteProjectFromDB } from '@/lib/db';
+import { 
+  loadOrMigrateInitialProject, 
+  saveProjectToDB, 
+  getAllProjectsFromDB, 
+  deleteProjectFromDB,
+  deletePhotoBlob 
+} from '@/lib/db';
 import { DEFAULT_RENOVATION_PROJECT } from '@/lib/default-data';
 import { getRoomWorkStages } from '@/lib/progress-helper';
 import { duplicateProject } from '@/lib/project-templates';
@@ -38,21 +44,36 @@ import { AddRoomModal } from '@/components/AddRoomModal';
 import { ReportGeneratorModal } from '@/components/ReportGeneratorModal';
 import { ProjectSwitcherModal } from '@/components/ProjectSwitcherModal';
 import { FloatingAIAssistant } from '@/components/FloatingAIAssistant';
+import { NotificationsDrawer } from '@/components/NotificationsDrawer';
+import { MobileBottomNav } from '@/components/MobileBottomNav';
+import { useToast } from '@/components/ToastProvider';
+import { syncProjectNotifications } from '@/lib/notification-engine';
 
 export default function HomePage() {
-  const [project, setProject] = useState<RenovationProject>(() => structuredClone(DEFAULT_RENOVATION_PROJECT));
+  const [project, setProject] = useState<RenovationProject>(() => {
+    const base = structuredClone(DEFAULT_RENOVATION_PROJECT);
+    return {
+      ...base,
+      notifications: syncProjectNotifications(base),
+    };
+  });
   const [allProjects, setAllProjects] = useState<RenovationProject[]>([]);
   const [activePipelineStep, setActivePipelineStep] = useState<RenovationPipelineStep>('measure');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProjectSwitcherOpen, setIsProjectSwitcherOpen] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [aiPrefilledPrompt, setAiPrefilledPrompt] = useState<string>('');
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [storageSaveFailed, setStorageSaveFailed] = useState(false);
+  const [pushPermissionState, setPushPermissionState] = useState<string>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  );
 
+  const { showToast } = useToast();
   const isOnline = useOnlineStatus();
 
   // Safely hydrate stored project (IndexedDB, migrating legacy localStorage data if present)
@@ -62,7 +83,11 @@ export default function HomePage() {
     queueMicrotask(async () => {
       const stored = await loadOrMigrateInitialProject();
       if (stored && stored.id) {
-        setProject(stored);
+        const withSyncedNotifs = {
+          ...stored,
+          notifications: syncProjectNotifications(stored),
+        };
+        setProject(withSyncedNotifs);
       }
       try {
         const all = await getAllProjectsFromDB();
@@ -91,17 +116,23 @@ export default function HomePage() {
     });
   }, []);
 
-  // Save to storage helper
+  // Save to storage helper with automated alert resynchronization
   const updateProject = useCallback((newProject: RenovationProject) => {
-    setProject(newProject);
+    // Keep automated notifications synchronized with budget, stages, curing times
+    const syncedProject: RenovationProject = {
+      ...newProject,
+      notifications: syncProjectNotifications(newProject),
+    };
+
+    setProject(syncedProject);
     setAllProjects((prev) => {
-      const exists = prev.some((p) => p.id === newProject.id);
+      const exists = prev.some((p) => p.id === syncedProject.id);
       if (exists) {
-        return prev.map((p) => (p.id === newProject.id ? newProject : p));
+        return prev.map((p) => (p.id === syncedProject.id ? syncedProject : p));
       }
-      return [...prev, newProject];
+      return [...prev, syncedProject];
     });
-    saveProjectToDB(newProject)
+    saveProjectToDB(syncedProject)
       .then(() => setStorageSaveFailed(false))
       .catch((e) => {
         console.error('Failed to save project to IndexedDB', e);
@@ -260,24 +291,40 @@ export default function HomePage() {
       ...project,
       expenses: [expense, ...project.expenses],
     });
-  }, [project, updateProject]);
+    showToast(`Dodano wydatek: ${expense.title}`, {
+      description: `Kwota: ${expense.amount.toFixed(2)} zł (${expense.category})`,
+      type: 'success',
+    });
+  }, [project, updateProject, showToast]);
 
   const handleDeleteExpense = useCallback((expenseId: string) => {
+    const target = project.expenses.find((e) => e.id === expenseId);
+    if (target?.receiptPhotoId) {
+      deletePhotoBlob(target.receiptPhotoId).catch((err) =>
+        console.warn('Failed to delete receipt photo blob', err)
+      );
+    }
     updateProject({
       ...project,
       expenses: project.expenses.filter((e) => e.id !== expenseId),
     });
-  }, [project, updateProject]);
+    showToast('Usunięto pozycję wydatku', { type: 'info' });
+  }, [project, updateProject, showToast]);
 
   const handleToggleExpensePaid = useCallback((expenseId: string) => {
+    const target = project.expenses.find((e) => e.id === expenseId);
+    const newPaidStatus = !target?.paid;
     updateProject({
       ...project,
       expenses: project.expenses.map((e) => {
         if (e.id !== expenseId) return e;
-        return { ...e, paid: !e.paid };
+        return { ...e, paid: newPaidStatus };
       }),
     });
-  }, [project, updateProject]);
+    showToast(newPaidStatus ? 'Oznaczono wydatek jako opłacony' : 'Cofnięto status opłacenia', {
+      type: 'info',
+    });
+  }, [project, updateProject, showToast]);
 
   const handleUpdateExpenseReceipt = useCallback((expenseId: string, photoId: string) => {
     const updatedExpenses = project.expenses.map((exp) => {
@@ -295,6 +342,12 @@ export default function HomePage() {
   }, [project, updateProject]);
 
   const handleDeleteWorkLog = useCallback((logId: string) => {
+    const target = (project.workLogs || []).find((l) => l.id === logId);
+    if (target?.photoId) {
+      deletePhotoBlob(target.photoId).catch((err) =>
+        console.warn('Failed to delete work log photo blob', err)
+      );
+    }
     updateProject({
       ...project,
       workLogs: (project.workLogs || []).filter((l) => l.id !== logId),
@@ -477,6 +530,7 @@ export default function HomePage() {
         return (
           <ViewBudgetExpenses
             project={project}
+            onUpdateProject={updateProject}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
             onToggleExpensePaid={handleToggleExpensePaid}
@@ -566,7 +620,7 @@ export default function HomePage() {
         onToggleTheme={handleToggleTheme}
         onSelectRoom={handleSelectRoom}
         onOpenAddExpense={() => setIsExpenseModalOpen(true)}
-        onOpenNotifications={() => setActivePipelineStep('plan')}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
         onOpenAddRoomModal={() => setIsAddRoomModalOpen(true)}
         onOpenReportModal={() => setIsReportModalOpen(true)}
@@ -682,6 +736,51 @@ export default function HomePage() {
           setIsProjectSwitcherOpen(false);
         }}
         onDeleteProject={handleDeleteProject}
+      />
+
+      <NotificationsDrawer
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        notifications={project.notifications}
+        onDismissNotification={handleDismissNotification}
+        onAddNotification={handleAddNotification}
+        onMarkAllAsRead={() => {
+          updateProject({
+            ...project,
+            notifications: project.notifications.map((n) => ({ ...n, read: true })),
+          });
+        }}
+        onClearAll={() => {
+          updateProject({
+            ...project,
+            notifications: [],
+          });
+        }}
+        onRequestPushPermission={async () => {
+          if (typeof window !== 'undefined' && 'Notification' in window) {
+            try {
+              const perm = await Notification.requestPermission();
+              setPushPermissionState(perm);
+              if (perm === 'granted') {
+                new Notification('Renowacje u Kaczaka: Powiadomienia włączone!', {
+                  body: 'Będziesz na bieżąco informowany o terminach prac i czasach schnięcia.',
+                  icon: '/icon.svg',
+                });
+              }
+            } catch (err) {
+              console.warn('Notification permission error', err);
+            }
+          }
+        }}
+        pushPermissionState={pushPermissionState}
+      />
+
+      {/* Mobile Bottom Navigation Bar (Thumb zone) */}
+      <MobileBottomNav
+        activeStep={activePipelineStep}
+        onSelectStep={(step) => setActivePipelineStep(step)}
+        onOpenQuickExpense={() => setIsExpenseModalOpen(true)}
+        onOpenReportModal={() => setIsReportModalOpen(true)}
       />
 
     </div>

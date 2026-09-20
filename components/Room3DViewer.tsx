@@ -58,6 +58,34 @@ interface Room3DViewerProps {
   onOpenWalkthrough?: () => void;
 }
 
+/**
+ * Deep recursive disposal of Three.js objects, geometries, materials, and canvas textures
+ * to prevent GPU VRAM leaks during iterative interior remodeling and texture changes.
+ */
+function disposeHierarchy(obj: THREE.Object3D) {
+  obj.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry) {
+      mesh.geometry.dispose();
+    }
+    if (mesh.material) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      materials.forEach((mat) => {
+        if (!mat) return;
+        // Dispose textures mapped to material
+        const matRecord = mat as unknown as Record<string, unknown>;
+        Object.keys(matRecord).forEach((key) => {
+          const prop = matRecord[key];
+          if (prop && typeof (prop as { dispose?: unknown }).dispose === 'function') {
+            (prop as { dispose: () => void }).dispose();
+          }
+        });
+        mat.dispose();
+      });
+    }
+  });
+}
+
 type LightingPreset = 'day' | 'sunset' | 'night';
 type CameraViewPreset = 'isometric' | 'eye_level' | 'top_down' | 'corner';
 
@@ -593,11 +621,11 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const roomGroup = roomGroupRef.current;
     if (!roomGroup) return;
 
-    // Clean previous room geometry
+    // Clean previous room geometry, materials and procedural canvas textures
     while (roomGroup.children.length > 0) {
       const child = roomGroup.children[0];
+      disposeHierarchy(child);
       roomGroup.remove(child);
-      if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
     }
 
     const { width: W, length: L, height: H } = room;

@@ -206,6 +206,51 @@ export interface WorkLogEntry {
   createdAt: string;
 }
 
+export type ContractorTrade = 
+  | 'general'
+  | 'electrician'
+  | 'plumber'
+  | 'tiler'
+  | 'painter'
+  | 'carpenter'
+  | 'plasterer'
+  | 'hvac'
+  | 'doors_floors';
+
+export type ContractorStatus = 
+  | 'contact'
+  | 'quote_received'
+  | 'contract_signed'
+  | 'in_progress'
+  | 'completed';
+
+export interface ContractorPayment {
+  id: string;
+  date: string;
+  amount: number; // PLN
+  type: 'advance' | 'stage_settlement' | 'final';
+  note: string;
+  receiptPhotoId?: string;
+  linkedExpenseId?: string;
+}
+
+export interface Contractor {
+  id: string;
+  name: string;
+  companyName?: string;
+  nip?: string;
+  phone: string;
+  email?: string;
+  trade: ContractorTrade;
+  agreedTotalCost: number; // PLN
+  status: ContractorStatus;
+  scopeNotes: string;
+  startDate?: string;
+  endDate?: string;
+  payments: ContractorPayment[];
+  rating?: number; // 1 - 5
+}
+
 export interface RenovationProject {
   id: string;
   title: string;
@@ -220,6 +265,7 @@ export interface RenovationProject {
   materials: MaterialCalculation[];
   expenses: Expense[];
   workLogs?: WorkLogEntry[];
+  contractors?: Contractor[];
   notifications: NotificationItem[];
   qaChecklist: QAChecklistItem[];
   activeStep: RenovationPipelineStep;

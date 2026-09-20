@@ -377,23 +377,64 @@ export const ViewDesignMaterials: React.FC<ViewDesignMaterialsProps> = ({
                 </p>
               </div>
 
-              {/* Waste Margin Input */}
-              <div className="flex items-center gap-3 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800">
-                <label htmlFor="waste-margin-input" className="text-xs text-slate-400 font-medium">
-                  Naddatek na odpady:
-                </label>
-                <div className="flex items-center gap-1">
-                  <input
-                    id="waste-margin-input"
-                    type="number"
-                    min="0"
-                    max="50"
-                    step="1"
-                    value={wasteMarginPercent}
-                    onChange={(e) => setWasteMarginPercent(Math.max(0, Math.min(50, parseInt(e.target.value) || 0)))}
-                    className="w-16 rounded-md border border-teal-500/40 bg-teal-950/80 px-2 py-0.5 text-sm font-mono font-bold text-teal-400 focus:border-teal-400 focus:outline-hidden"
-                  />
-                  <span className="font-mono text-sm font-bold text-teal-400">%</span>
+              {/* Waste Margin Input & Presets */}
+              <div className="flex flex-wrap items-center gap-3 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="waste-margin-input" className="text-xs text-slate-400 font-medium">
+                    Naddatek na odpady:
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      id="waste-margin-input"
+                      type="number"
+                      min="0"
+                      max="50"
+                      step="1"
+                      value={wasteMarginPercent}
+                      onChange={(e) => setWasteMarginPercent(Math.max(0, Math.min(50, parseInt(e.target.value) || 0)))}
+                      className="w-14 rounded-md border border-teal-500/40 bg-teal-950/80 px-2 py-0.5 text-xs font-mono font-bold text-teal-400 focus:border-teal-400 focus:outline-hidden"
+                    />
+                    <span className="font-mono text-xs font-bold text-teal-400">%</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setWasteMarginPercent(8)}
+                    className={`px-2 py-0.5 rounded-md border transition ${
+                      wasteMarginPercent === 8
+                        ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
+                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Układ klasyczny prosty (panele wzdłuż, płytki w cegiełkę)"
+                  >
+                    Prosty (+8%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWasteMarginPercent(15)}
+                    className={`px-2 py-0.5 rounded-md border transition ${
+                      wasteMarginPercent === 15
+                        ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
+                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Jodełka klasyczna / francuska / karo / skosy"
+                  >
+                    Jodełka (+15%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWasteMarginPercent(20)}
+                    className={`px-2 py-0.5 rounded-md border transition ${
+                      wasteMarginPercent === 20
+                        ? 'border-teal-500 bg-teal-500/20 text-teal-300 font-bold'
+                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Gres wielkoformatowy (spieki, 120x60, 120x120 ze szlifem 45°)"
+                  >
+                    Wielki format (+20%)
+                  </button>
                 </div>
               </div>
             </div>

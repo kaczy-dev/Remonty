@@ -15,6 +15,7 @@ import {
 import { Expense, ExpenseCategory, RenovationProject } from '@/types/renovation';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db/usePhotoSrc';
 import { ReceiptViewerModal } from '@/components/ReceiptViewerModal';
+import { ContractorManagerView } from '@/components/ContractorManagerView';
 import {
   Wallet,
   Receipt,
@@ -27,10 +28,12 @@ import {
   Printer,
   Camera,
   Paperclip,
+  Users,
 } from 'lucide-react';
 
 interface ViewBudgetExpensesProps {
   project: RenovationProject;
+  onUpdateProject?: (updated: RenovationProject) => void;
   onAddExpense: (expense: Expense) => void;
   onDeleteExpense: (expenseId: string) => void;
   onToggleExpensePaid: (expenseId: string) => void;
@@ -72,6 +75,7 @@ const ReceiptThumbnail: React.FC<{ photoId: string; onClick?: () => void }> = ({
 
 export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
   project,
+  onUpdateProject,
   onAddExpense,
   onDeleteExpense,
   onToggleExpensePaid,
@@ -79,6 +83,7 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
   onOpenReportModal,
   onUpdateExpenseReceipt,
 }) => {
+  const [costViewMode, setCostViewMode] = useState<'expenses' | 'contractors'>('expenses');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
   const [receiptFilter, setReceiptFilter] = useState<'all' | 'with_receipt' | 'no_receipt'>('all');
@@ -216,17 +221,77 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
 
       </div>
 
-      {/* Category Breakdown Progress Bars & Distribution */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
-            <PieChart className="w-4 h-4 text-teal-400" />
-            Rozbicie Kosztów według Kategorii
-          </h3>
-          <span className="text-xs text-slate-400 font-mono">
-            {project.expenses.length} zarejestrowanych wydatków
-          </span>
+      {/* Sub-view Switcher: Rejestr Wydatków vs Wykonawcy & Robocizna */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800 shrink-0">
+          <button
+            id="subview-expenses-btn"
+            type="button"
+            onClick={() => setCostViewMode('expenses')}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+              costViewMode === 'expenses'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Rejestr Wydatków & Paragony ({project.expenses.length})</span>
+          </button>
+          <button
+            id="subview-contractors-btn"
+            type="button"
+            onClick={() => setCostViewMode('contractors')}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+              costViewMode === 'contractors'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Wykonawcy, Umowy & Stawki ({project.contractors?.length || 0})</span>
+          </button>
         </div>
+
+        {costViewMode === 'expenses' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition cursor-pointer"
+              title="Eksportuj wydatki do pliku CSV (Excel)"
+            >
+              <Download className="w-3.5 h-3.5 text-teal-400" />
+              <span className="hidden sm:inline">Eksport CSV</span>
+            </button>
+            <button
+              id="add-expense-cost-view-btn"
+              onClick={onOpenAddModal}
+              className="flex items-center gap-1.5 rounded-xl bg-teal-500 px-3.5 py-2 text-xs font-semibold text-slate-950 shadow-sm hover:bg-teal-400 transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Dodaj wydatek</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {costViewMode === 'contractors' ? (
+        <ContractorManagerView
+          project={project}
+          onUpdateProject={onUpdateProject || (() => {})}
+        />
+      ) : (
+        <>
+          {/* Category Breakdown Progress Bars & Distribution */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                <PieChart className="w-4 h-4 text-teal-400" />
+                Rozbicie Kosztów według Kategorii
+              </h3>
+              <span className="text-xs text-slate-400 font-mono">
+                {project.expenses.length} zarejestrowanych wydatków
+              </span>
+            </div>
 
         {/* Segmented Cumulative Bar */}
         <div className="w-full h-3 rounded-xl bg-slate-950 overflow-hidden flex border border-slate-800">
@@ -527,6 +592,8 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
         </div>
 
       </div>
+      </>
+      )}
 
       {/* Receipt Viewer & Image Zoom Modal */}
       <ReceiptViewerModal

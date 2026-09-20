@@ -43,6 +43,17 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
 
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
+  const userPhotoUrlRef = useRef<string | null>(null);
+  userPhotoUrlRef.current = userPhotoUrl;
+
+  React.useEffect(() => {
+    return () => {
+      if (userPhotoUrlRef.current) {
+        URL.revokeObjectURL(userPhotoUrlRef.current);
+      }
+    };
+  }, []);
+
   const [showFurnitureModal, setShowFurnitureModal] = useState<boolean>(false);
   const [newFurnType, setNewFurnType] = useState<string>('sofa');
   const [newFurnName, setNewFurnName] = useState<string>('Sofa 3-osobowa');
@@ -269,7 +280,11 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                setUserPhotoUrl(URL.createObjectURL(file));
+                if (userPhotoUrl) {
+                  URL.revokeObjectURL(userPhotoUrl);
+                }
+                const newObjUrl = URL.createObjectURL(file);
+                setUserPhotoUrl(newObjUrl);
                 const photoId = `${room.id}-${Date.now()}`;
                 savePhotoBlob(photoId, file)
                   .then(() => onUpdateRoomPhoto?.(room.id, `${LOCAL_PHOTO_PREFIX}${photoId}`))

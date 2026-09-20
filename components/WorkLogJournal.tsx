@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { WorkLogEntry, Room, StageCategory } from '@/types/renovation';
 import { savePhotoBlob } from '@/lib/db/photos';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db/usePhotoSrc';
@@ -103,6 +103,17 @@ export const WorkLogJournal: React.FC<WorkLogJournalProps> = ({
       setPhotoPreview(null);
     }
   };
+
+  const photoPreviewRef = useRef<string | null>(null);
+  photoPreviewRef.current = photoPreview;
+
+  useEffect(() => {
+    return () => {
+      if (photoPreviewRef.current) {
+        URL.revokeObjectURL(photoPreviewRef.current);
+      }
+    };
+  }, []);
 
   const handleSaveEntry = async (e: React.FormEvent) => {
     e.preventDefault();
