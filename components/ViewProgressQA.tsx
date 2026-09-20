@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Room, QAChecklistItem } from '@/types/renovation';
+import { Room, QAChecklistItem, StageCategory } from '@/types/renovation';
 import { 
   CheckSquare, 
   SplitSquareVertical, 
@@ -13,7 +13,9 @@ import {
   ShieldCheck, 
   FileText, 
   TrendingUp,
-  Sparkles
+  Sparkles,
+  Plus,
+  X
 } from 'lucide-react';
 
 interface ViewProgressQAProps {
@@ -31,6 +33,13 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'before_after' | 'qa' | 'diy'>('before_after');
   const [sliderPosition, setSliderPosition] = useState(52); // percentage 0 - 100
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newNorm, setNewNorm] = useState('');
+  const [newCategory, setNewCategory] = useState<StageCategory>('finishing');
+  const [newSeverity, setNewSeverity] = useState<QAChecklistItem['severity']>('important');
+  const [newTolerance, setNewTolerance] = useState('');
+  const [newTips, setNewTips] = useState('');
 
   // Filter QA items for current room or global
   const currentQA = qaItems.filter((q) => !q.roomId || q.roomId === room.id);
@@ -190,9 +199,19 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
                 Wymagania techniczne, dopuszczalne odchyłki i wytyczne inspekcji dla poszczególnych branż.
               </p>
             </div>
-            <span className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-mono text-slate-300">
-              {currentQA.length} punktów kontrolnych
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-mono text-slate-300">
+                {currentQA.length} punktów kontrolnych
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1 rounded-lg bg-teal-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Dodaj punkt</span>
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -377,6 +396,159 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
               </ul>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Dodaj Własny Punkt Kontrolny / Normę Odbiorową */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-teal-500/40 bg-slate-900 p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-5 h-5 text-teal-400" />
+                <h4 className="text-sm font-bold text-white">Nowy Punkt Kontrolny Odbioru</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newTitle.trim()) return;
+
+                onAddQACheck({
+                  id: `qa-${Date.now()}`,
+                  roomId: room.id,
+                  stageCategory: newCategory,
+                  title: newTitle.trim(),
+                  standardNorm: newNorm.trim() || 'Wytyczne branżowe ITB',
+                  severity: newSeverity,
+                  status: 'pending',
+                  toleranceGuide: newTolerance.trim() || 'Zgodnie z projektem i instrukcją producenta',
+                  inspectionTips: newTips.trim() || 'Sprawdź wizualnie i pomiarowo przed podpisaniem protokołu odbioru.',
+                });
+
+                // Reset form
+                setNewTitle('');
+                setNewNorm('');
+                setNewCategory('finishing');
+                setNewSeverity('important');
+                setNewTolerance('');
+                setNewTips('');
+                setShowAddModal(false);
+              }}
+              className="space-y-3 text-xs"
+            >
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Tytuł kontroli / Element odbioru:
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="np. Płaszczyzna i spadek podłogi pod prysznicem walk-in"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white placeholder-slate-500 focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Branża / Kategoria robót:
+                  </label>
+                  <select
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value as StageCategory)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white focus:border-teal-500 focus:outline-hidden"
+                  >
+                    <option value="finishing">Wykończenie / Gładzie</option>
+                    <option value="flooring">Posadzki / Gres / Panele</option>
+                    <option value="installation">Instalacje Wod-Kan / Prąd</option>
+                    <option value="insulation">Hydroizolacja / Ocieplenie</option>
+                    <option value="masonry">Wylewki / Mury</option>
+                    <option value="carpentry">Zabudowa meblowa / G-K</option>
+                    <option value="demolition">Demolka / Wyburzenia</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Norma / Wytyczne:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="np. PN-EN 14411 / ITB"
+                    value={newNorm}
+                    onChange={(e) => setNewNorm(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white placeholder-slate-500 focus:border-teal-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Waga usterki:
+                  </label>
+                  <select
+                    value={newSeverity}
+                    onChange={(e) => setNewSeverity(e.target.value as QAChecklistItem['severity'])}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white focus:border-teal-500 focus:outline-hidden"
+                  >
+                    <option value="critical">Krytyczna (blokująca)</option>
+                    <option value="important">Ważna (wymaga poprawki)</option>
+                    <option value="recommended">Zalecenie estetyczne</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Dopuszczalna tolerancja / Warunek zaliczenia:
+                </label>
+                <input
+                  type="text"
+                  placeholder="np. Spadek min. 1.5–2% w kierunku odpływu liniowego"
+                  value={newTolerance}
+                  onChange={(e) => setNewTolerance(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white placeholder-slate-500 focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Wskazówki dla inwestora / metoda badania:
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="np. Wylej szklankę wody lub użyj poziomicy cyfrowej."
+                  value={newTips}
+                  onChange={(e) => setNewTips(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white placeholder-slate-500 focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="rounded-xl px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-teal-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-xs"
+                >
+                  Dodaj punkt kontrolny
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
