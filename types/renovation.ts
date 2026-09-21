@@ -199,6 +199,10 @@ export interface QAChecklistItem {
   measuredValue?: string;
   toleranceGuide: string;
   inspectionTips: string;
+  pinX?: number; // percentage coordinate 0-100 on room photo
+  pinY?: number; // percentage coordinate 0-100 on room photo
+  pinPhotoType?: 'before' | 'after' | 'room';
+  defectPhotoId?: string; // photo closeup of the defect in IndexedDB
 }
 
 export type RenovationPipelineStep =

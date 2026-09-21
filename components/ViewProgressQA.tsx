@@ -21,7 +21,12 @@ import {
   RotateCcw,
   Image as ImageIcon,
   Check,
-  Loader2
+  Loader2,
+  MapPin,
+  Crosshair,
+  Trash2,
+  CheckCircle2,
+  ChevronRight
 } from 'lucide-react';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX, savePhotoBlob, deletePhotoBlob } from '@/lib/db';
 import { compressImage } from '@/lib/image-compressor';
@@ -31,6 +36,7 @@ interface ViewProgressQAProps {
   qaItems: QAChecklistItem[];
   onUpdateQAStatus: (qaId: string, status: QAChecklistItem['status']) => void;
   onAddQACheck: (item: QAChecklistItem) => void;
+  onDeleteQACheck?: (qaId: string) => void;
   onUpdateRoomPhotos?: (roomId: string, updates: { beforePhotoUrl?: string; afterPhotoUrl?: string }) => void;
 }
 
@@ -39,9 +45,10 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   qaItems,
   onUpdateQAStatus,
   onAddQACheck,
+  onDeleteQACheck,
   onUpdateRoomPhotos,
 }) => {
-  const [activeTab, setActiveTab] = useState<'before_after' | 'qa' | 'diy'>('before_after');
+  const [activeTab, setActiveTab] = useState<'before_after' | 'punch_list' | 'qa' | 'diy'>('punch_list');
   const [sliderPosition, setSliderPosition] = useState(50); // percentage 0 - 100
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -51,6 +58,12 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   const [newTolerance, setNewTolerance] = useState('');
   const [newTips, setNewTips] = useState('');
 
+  // Punch list pin placement state
+  const [activePinPhotoType, setActivePinPhotoType] = useState<'after' | 'before' | 'room'>('after');
+  const [isPlacingPin, setIsPlacingPin] = useState(false);
+  const [pendingPinCoords, setPendingPinCoords] = useState<{ x: number; y: number } | null>(null);
+  const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+
   // Photo upload & compression states
   const [isCompressingBefore, setIsCompressingBefore] = useState(false);
   const [isCompressingAfter, setIsCompressingAfter] = useState(false);
@@ -59,6 +72,7 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   // Resolve IndexedDB blobs or remote URLs
   const resolvedBeforePhoto = usePhotoSrc(room.beforePhotoUrl);
   const resolvedAfterPhoto = usePhotoSrc(room.afterPhotoUrl);
+  const resolvedRoomPhoto = usePhotoSrc(room.photoUrl);
 
   const beforePhoto = resolvedBeforePhoto || room.beforePhotoUrl || 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80';
   const afterPhoto = resolvedAfterPhoto || room.afterPhotoUrl || 'https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=800&q=80';
@@ -135,13 +149,38 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
   const passedCount = currentQA.filter((q) => q.status === 'passed').length;
   const failedCount = currentQA.filter((q) => q.status === 'failed').length;
 
+  // Punch list pins for current room
+  const pinItems = currentQA.filter((q) => q.pinX !== undefined && q.pinY !== undefined);
+  const pinPhotoItems = pinItems.filter((q) => (q.pinPhotoType || 'after') === activePinPhotoType);
+  const pinFailedCount = pinItems.filter((q) => q.status === 'failed').length;
+  const pinPassedCount = pinItems.filter((q) => q.status === 'passed').length;
+
+  const currentInspectPhoto =
+    activePinPhotoType === 'before'
+      ? beforePhoto
+      : activePinPhotoType === 'room' && resolvedRoomPhoto
+      ? resolvedRoomPhoto
+      : afterPhoto;
+
   return (
     <div className="space-y-6">
       
       {/* Top Navigation Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
         <div className="flex items-center gap-2">
-          <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+          <div className="flex flex-wrap rounded-xl bg-slate-950 p-1 border border-slate-800">
+            <button
+              id="tab-punch-list-btn"
+              onClick={() => setActiveTab('punch_list')}
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+                activeTab === 'punch_list'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Usterki na Zdjęciu ({pinItems.length})</span>
+            </button>
             <button
               id="tab-before-after-btn"
               onClick={() => setActiveTab('before_after')}
@@ -152,7 +191,7 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
               }`}
             >
               <SplitSquareVertical className="w-3.5 h-3.5" />
-              <span>Porównanie Przed / Po (Suwak)</span>
+              <span>Porównanie Przed / Po</span>
             </button>
             <button
               id="tab-qa-checklist-btn"
@@ -164,7 +203,7 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
               }`}
             >
               <CheckSquare className="w-3.5 h-3.5" />
-              <span>Checklisty Odbiorowe & Normy ({passedCount}/{currentQA.length})</span>
+              <span>Checklisty & Normy ({passedCount}/{currentQA.length})</span>
             </button>
             <button
               id="tab-diy-advisor-btn"
@@ -181,20 +220,400 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
           </div>
         </div>
 
-        {/* QA Badges */}
-        <div className="flex items-center gap-3 text-xs">
+        {/* QA & Punch list Badges */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {pinFailedCount > 0 && (
+            <div className="rounded-xl border border-rose-500/40 bg-rose-950/60 px-3 py-1.5 text-rose-300 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase">Wady na zdjęciach</span>
+                <strong className="font-mono">{pinFailedCount} do usunięcia</strong>
+              </div>
+            </div>
+          )}
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-3 py-1.5 text-emerald-300">
             <span className="text-[10px] text-slate-400 block uppercase">Zgodne z normą</span>
             <strong className="font-mono">{passedCount} punktów</strong>
           </div>
           {failedCount > 0 && (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-950/40 px-3 py-1.5 text-rose-300">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-950/40 px-3 py-1.5 text-amber-300">
               <span className="text-[10px] text-slate-400 block uppercase">Do poprawki</span>
               <strong className="font-mono">{failedCount} usterki</strong>
             </div>
           )}
         </div>
       </div>
+
+      {/* Mode 0: Interactive Photo Punch List (Defect Pinning on Photos) */}
+      {activeTab === 'punch_list' && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-5">
+          {/* Header & Controls */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-xl bg-rose-500/20 text-rose-400">
+                  <MapPin className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-rose-400">
+                    Protokół Usterek na Fotografii (Punch List) • {room.name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Wskaż usterki bezpośrednio na zdjęciu ze smartfona. Pinezki zostaną uwzględnione w oficjalnym Protokole Odbioru.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Photo Selector Switcher & Add Pin Button */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-950 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePinPhotoType('after');
+                    setSelectedPinId(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    activePinPhotoType === 'after'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Zdjęcie PO
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePinPhotoType('before');
+                    setSelectedPinId(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    activePinPhotoType === 'before'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Zdjęcie PRZED
+                </button>
+                {resolvedRoomPhoto && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePinPhotoType('room');
+                      setSelectedPinId(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      activePinPhotoType === 'room'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Pokój 3D
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsPlacingPin(!isPlacingPin)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg transition active:scale-95 ${
+                  isPlacingPin
+                    ? 'bg-rose-500 text-white ring-4 ring-rose-500/30 animate-pulse'
+                    : 'bg-gradient-to-r from-rose-600 to-amber-600 hover:brightness-110 text-white'
+                }`}
+              >
+                <Crosshair className="w-4 h-4" />
+                <span>{isPlacingPin ? 'Kliknij na zdjęciu poniżej...' : '+ Oznacz usterkę na zdjęciu'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Inspection Photo Canvas with Pins */}
+          <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-slate-700 select-none shadow-2xl bg-black group">
+            {/* Guide banner when placing pin */}
+            {isPlacingPin && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-slate-950/95 border border-rose-500/80 text-rose-300 px-4 py-1.5 rounded-full text-xs font-bold shadow-2xl animate-bounce flex items-center gap-2">
+                <Crosshair className="w-3.5 h-3.5 text-rose-400 animate-spin" />
+                <span>Kliknij dokładnie w miejscu widocznej wady na zdjęciu</span>
+              </div>
+            )}
+
+            {/* Photo background */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={currentInspectPhoto}
+              alt={`Zdjęcie do inspekcji usterek - ${room.name}`}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+
+            {/* Clickable Overlay Layer for adding pin */}
+            <div
+              onClick={(e) => {
+                if (!isPlacingPin) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 100;
+                const y = ((e.clientY - rect.top) / rect.height) * 100;
+                setPendingPinCoords({
+                  x: Math.round(x * 10) / 10,
+                  y: Math.round(y * 10) / 10,
+                });
+                setNewTitle('');
+                setNewNorm('PN-B-10110:2005');
+                setNewSeverity('important');
+                setNewTolerance('Dopuszczalna odchyłka max 2mm / 2m');
+                setNewTips('Wymagane zeszlifowanie, zaprawka i ponowne malowanie.');
+                setShowAddModal(true);
+                setIsPlacingPin(false);
+              }}
+              className={`absolute inset-0 z-10 ${
+                isPlacingPin ? 'cursor-crosshair bg-rose-500/10' : 'cursor-default'
+              }`}
+            />
+
+            {/* Rendered Defect Pins */}
+            {pinPhotoItems.map((item, idx) => {
+              const isFailed = item.status === 'failed';
+              const isPassed = item.status === 'passed';
+              const isSelected = selectedPinId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  style={{ left: `${item.pinX}%`, top: `${item.pinY}%` }}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 z-20"
+                >
+                  {/* Outer pulse ring if defect is active */}
+                  {isFailed && (
+                    <span className="absolute -inset-2.5 rounded-full bg-rose-500/40 animate-ping pointer-events-none" />
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPinId(selectedPinId === item.id ? null : item.id);
+                    }}
+                    className={`relative flex items-center justify-center w-8 h-8 rounded-full font-bold text-xs shadow-2xl border-2 transition active:scale-90 ${
+                      isPassed
+                        ? 'bg-emerald-600 border-emerald-300 text-white ring-2 ring-emerald-400/40'
+                        : isFailed
+                        ? 'bg-rose-600 border-rose-300 text-white ring-2 ring-rose-400/50'
+                        : 'bg-amber-600 border-amber-300 text-white ring-2 ring-amber-400/50'
+                    } ${isSelected ? 'scale-125 ring-4 ring-white shadow-rose-500/50' : 'hover:scale-110'}`}
+                    title={`#${idx + 1}: ${item.title}`}
+                  >
+                    {isPassed ? <Check className="w-4 h-4" /> : idx + 1}
+                  </button>
+
+                  {/* Popover Card when Pin is Selected */}
+                  {isSelected && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-10 left-1/2 -translate-x-1/2 w-64 rounded-2xl border border-slate-700 bg-slate-950/95 p-3.5 shadow-2xl backdrop-blur-xl z-30 text-xs text-slate-100 animate-in fade-in zoom-in-95"
+                    >
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${
+                            isPassed ? 'bg-emerald-400' : isFailed ? 'bg-rose-400' : 'bg-amber-400'
+                          }`} />
+                          <strong className="text-white">Usterka #{idx + 1}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPinId(null)}
+                          className="text-slate-400 hover:text-white p-0.5"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <h4 className="font-bold text-white text-xs mb-1">{item.title}</h4>
+                      <p className="text-[11px] text-slate-400 mb-2 font-mono">{item.standardNorm}</p>
+
+                      <div className="text-[10px] text-slate-300 bg-slate-900 p-2 rounded-lg border border-slate-800 mb-3">
+                        <span className="text-slate-400 block font-semibold mb-0.5">Wytyczna odbioru:</span>
+                        {item.toleranceGuide}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800">
+                        {isPassed ? (
+                          <button
+                            type="button"
+                            onClick={() => onUpdateQAStatus(item.id, 'failed')}
+                            className="flex items-center gap-1 text-[10px] text-rose-400 hover:underline"
+                          >
+                            <span>Przywróć usterkę</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onUpdateQAStatus(item.id, 'passed')}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold shadow-xs transition"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Poprawione / OK</span>
+                          </button>
+                        )}
+
+                        {onDeleteQACheck && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteQACheck(item.id);
+                              setSelectedPinId(null);
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-400 transition"
+                            title="Usuń tę pinezkę"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Photo Badge Info */}
+            <div className="absolute bottom-3 left-3 pointer-events-none rounded-xl bg-slate-950/85 backdrop-blur-md px-3 py-1.5 text-xs text-slate-300 border border-slate-800 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400" />
+              <span>
+                {activePinPhotoType === 'after'
+                  ? 'Zdjęcie: Stan Po Remoncie'
+                  : activePinPhotoType === 'before'
+                  ? 'Zdjęcie: Stan Przed Remontem'
+                  : 'Zdjęcie: Pomieszczenie 3D'}
+              </span>
+              <span className="font-mono text-teal-300 font-bold">
+                ({pinPhotoItems.length} {pinPhotoItems.length === 1 ? 'pinezka' : 'pinezek'})
+              </span>
+            </div>
+          </div>
+
+          {/* Punch List Defects Cards & Status Table */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <span>Zarejestrowane usterki na tym zdjęciu ({pinPhotoItems.length})</span>
+              </h4>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-rose-400 font-bold font-mono">
+                  {pinPhotoItems.filter((p) => p.status === 'failed').length} do poprawki
+                </span>
+                <span className="text-slate-600">•</span>
+                <span className="text-emerald-400 font-bold font-mono">
+                  {pinPhotoItems.filter((p) => p.status === 'passed').length} usunięte
+                </span>
+              </div>
+            </div>
+
+            {pinPhotoItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center text-xs text-slate-400">
+                <p className="font-semibold text-slate-300 mb-1">Brak zaznaczonych usterek na tym zdjęciu.</p>
+                <p>Kliknij przycisk „+ Oznacz usterkę na zdjęciu” powyżej i wskaż wadę wykonawczą na fotografii.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {pinPhotoItems.map((item, idx) => {
+                  const isFailed = item.status === 'failed';
+                  const isPassed = item.status === 'passed';
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedPinId(item.id)}
+                      className={`rounded-2xl border p-4 transition cursor-pointer ${
+                        selectedPinId === item.id
+                          ? 'border-rose-500 bg-slate-900 ring-2 ring-rose-500/30'
+                          : 'border-slate-800 bg-slate-950/70 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`w-7 h-7 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                            isPassed
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : isFailed
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          }`}>
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <h5 className="font-bold text-white text-xs">{item.title}</h5>
+                            <span className="text-[10px] text-slate-400 font-mono">{item.standardNorm}</span>
+                          </div>
+                        </div>
+
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase shrink-0 ${
+                          isPassed
+                            ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300'
+                            : isFailed
+                            ? 'border-rose-500/40 bg-rose-950/60 text-rose-300'
+                            : 'border-amber-500/40 bg-amber-950/60 text-amber-300'
+                        }`}>
+                          {isPassed ? 'Poprawiona' : isFailed ? 'Do poprawki' : 'Oczekuje'}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 mb-3 bg-slate-900/60 p-2 rounded-xl border border-slate-800/80">
+                        {item.toleranceGuide}
+                      </p>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Pozycja: X={item.pinX?.toFixed(0)}%, Y={item.pinY?.toFixed(0)}%
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                          {isPassed ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onUpdateQAStatus(item.id, 'failed');
+                              }}
+                              className="text-[11px] text-slate-400 hover:text-rose-300 transition"
+                            >
+                              Oznacz jako usterkę
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onUpdateQAStatus(item.id, 'passed');
+                              }}
+                              className="flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1 text-[11px] font-bold text-white transition shadow-xs"
+                            >
+                              <Check className="w-3 h-3" />
+                              <span>Naprawione</span>
+                            </button>
+                          )}
+
+                          {onDeleteQACheck && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteQACheck(item.id);
+                              }}
+                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-900 transition"
+                              title="Usuń usterkę"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Mode 1: Interactive Before / After Split Slider */}
       {activeTab === 'before_after' && (
@@ -629,17 +1048,35 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
           <div className="w-full max-w-md rounded-2xl border border-teal-500/40 bg-slate-900 p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <CheckSquare className="w-5 h-5 text-teal-400" />
-                <h4 className="text-sm font-bold text-white">Nowy Punkt Kontrolny Odbioru</h4>
+                {pendingPinCoords ? (
+                  <MapPin className="w-5 h-5 text-rose-400" />
+                ) : (
+                  <CheckSquare className="w-5 h-5 text-teal-400" />
+                )}
+                <h4 className="text-sm font-bold text-white">
+                  {pendingPinCoords ? 'Zgłoszenie Usterki ze Zdjęcia (Pinezka)' : 'Nowy Punkt Kontrolny Odbioru'}
+                </h4>
               </div>
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setPendingPinCoords(null);
+                }}
                 className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-slate-800"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {pendingPinCoords && (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500/40 bg-rose-950/40 text-xs text-rose-300">
+                <MapPin className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>
+                  Pozycja na zdjęciu: <strong>X: {pendingPinCoords.x}%, Y: {pendingPinCoords.y}%</strong> ({activePinPhotoType === 'after' ? 'Stan PO' : activePinPhotoType === 'before' ? 'Stan PRZED' : 'Pokój 3D'})
+                </span>
+              </div>
+            )}
 
             <form
               onSubmit={(e) => {
@@ -653,9 +1090,12 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
                   title: newTitle.trim(),
                   standardNorm: newNorm.trim() || 'Wytyczne branżowe ITB',
                   severity: newSeverity,
-                  status: 'pending',
+                  status: pendingPinCoords ? 'failed' : 'pending',
                   toleranceGuide: newTolerance.trim() || 'Zgodnie z projektem i instrukcją producenta',
                   inspectionTips: newTips.trim() || 'Sprawdź wizualnie i pomiarowo przed podpisaniem protokołu odbioru.',
+                  pinX: pendingPinCoords ? pendingPinCoords.x : undefined,
+                  pinY: pendingPinCoords ? pendingPinCoords.y : undefined,
+                  pinPhotoType: pendingPinCoords ? activePinPhotoType : undefined,
                 });
 
                 // Reset form
@@ -665,6 +1105,7 @@ export const ViewProgressQA: React.FC<ViewProgressQAProps> = ({
                 setNewSeverity('important');
                 setNewTolerance('');
                 setNewTips('');
+                setPendingPinCoords(null);
                 setShowAddModal(false);
               }}
               className="space-y-3 text-xs"

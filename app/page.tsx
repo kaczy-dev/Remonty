@@ -637,6 +637,12 @@ export default function HomePage() {
                 qaChecklist: [...project.qaChecklist, item],
               });
             }}
+            onDeleteQACheck={(qaId) => {
+              updateProject({
+                ...project,
+                qaChecklist: project.qaChecklist.filter((q) => q.id !== qaId),
+              });
+            }}
             onUpdateRoomPhotos={handleUpdateRoomPhotos}
           />
         );
