@@ -317,6 +317,66 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   // Floor BOM / Cost Estimate HUD
   const [showFloorBomHud, setShowFloorBomHud] = useState<boolean>(false);
 
+  // Custom Material Photo Swatches (tiles/laminates/wallpaper photo sample from store)
+  const floorSwatchInputRef = useRef<HTMLInputElement>(null);
+  const wallSwatchInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingSwatch, setIsUploadingSwatch] = useState(false);
+
+  const customFloorPhotoSrc = usePhotoSrc(room.design.customFloorPhotoUrl);
+  const customWallPhotoSrc = usePhotoSrc(room.design.customWallPhotoUrl);
+
+  const handleFloorSwatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUpdateRoomDesign) return;
+    try {
+      setIsUploadingSwatch(true);
+      const compressed = await compressImage(file, {
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.85,
+        mimeType: 'image/webp',
+      });
+      const photoId = `swatch-floor-${room.id}-${Date.now()}`;
+      await savePhotoBlob(photoId, compressed);
+      onUpdateRoomDesign(room.id, {
+        ...room.design,
+        customFloorPhotoUrl: `${LOCAL_PHOTO_PREFIX}${photoId}`,
+        floorType: 'Własny próbnik ze sklepu',
+      });
+    } catch (err) {
+      console.error('Błąd wgrywania próbnika podłogi:', err);
+    } finally {
+      setIsUploadingSwatch(false);
+      if (floorSwatchInputRef.current) floorSwatchInputRef.current.value = '';
+    }
+  };
+
+  const handleWallSwatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUpdateRoomDesign) return;
+    try {
+      setIsUploadingSwatch(true);
+      const compressed = await compressImage(file, {
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.85,
+        mimeType: 'image/webp',
+      });
+      const photoId = `swatch-wall-${room.id}-${Date.now()}`;
+      await savePhotoBlob(photoId, compressed);
+      onUpdateRoomDesign(room.id, {
+        ...room.design,
+        customWallPhotoUrl: `${LOCAL_PHOTO_PREFIX}${photoId}`,
+        wallType: 'Własny próbnik ze sklepu',
+      });
+    } catch (err) {
+      console.error('Błąd wgrywania próbnika ściany:', err);
+    } finally {
+      setIsUploadingSwatch(false);
+      if (wallSwatchInputRef.current) wallSwatchInputRef.current.value = '';
+    }
+  };
+
   const resolvedPhotoSrc = usePhotoSrc(room.photoUrl);
 
   // Photo Upload Handler with Client-Side WebP Compression & IndexedDB Storage
@@ -1052,13 +1112,21 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const halfL = L / 2;
 
     // --- 1. FLOOR ---
-    let floorTexture: THREE.CanvasTexture;
+    let floorTexture: THREE.Texture;
     const floorTypeStr = (room.design.floorType || '').toLowerCase();
     const explicitFloorTexture = room.design.floorTexture;
     const floorColor = room.design.floorColor || '#b48256';
     const floorRoughness = room.design.floorRoughness !== undefined ? room.design.floorRoughness : 0.32;
 
-    if (explicitFloorTexture === 'herringbone' || (!explicitFloorTexture && (floorTypeStr.includes('jodeł') || floorTypeStr.includes('dąb') || floorTypeStr.includes('panel')))) {
+    if (customFloorPhotoSrc) {
+      const loader = new THREE.TextureLoader();
+      const loadedTex = loader.load(customFloorPhotoSrc);
+      loadedTex.wrapS = THREE.RepeatWrapping;
+      loadedTex.wrapT = THREE.RepeatWrapping;
+      loadedTex.repeat.set(Math.max(1, W / 0.8), Math.max(1, L / 0.8));
+      loadedTex.colorSpace = THREE.SRGBColorSpace;
+      floorTexture = loadedTex;
+    } else if (explicitFloorTexture === 'herringbone' || (!explicitFloorTexture && (floorTypeStr.includes('jodeł') || floorTypeStr.includes('dąb') || floorTypeStr.includes('panel')))) {
       floorTexture = createWoodTexture('herringbone', floorColor);
     } else if (explicitFloorTexture === 'marble' || (!explicitFloorTexture && floorTypeStr.includes('marmur'))) {
       floorTexture = createMarbleTexture(floorColor);
@@ -1133,8 +1201,16 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     const explicitWallTexture = room.design.wallTexture;
     const wallRoughness = room.design.wallRoughness !== undefined ? room.design.wallRoughness : 0.85;
 
-    let wallTex: THREE.CanvasTexture | undefined;
-    if (explicitWallTexture === 'brick' || (!explicitWallTexture && wallTypeStr.includes('cegła'))) {
+    let wallTex: THREE.Texture | undefined;
+    if (customWallPhotoSrc) {
+      const loader = new THREE.TextureLoader();
+      const loadedTex = loader.load(customWallPhotoSrc);
+      loadedTex.wrapS = THREE.RepeatWrapping;
+      loadedTex.wrapT = THREE.RepeatWrapping;
+      loadedTex.repeat.set(Math.max(1, W / 1.0), Math.max(1, H / 1.0));
+      loadedTex.colorSpace = THREE.SRGBColorSpace;
+      wallTex = loadedTex;
+    } else if (explicitWallTexture === 'brick' || (!explicitWallTexture && wallTypeStr.includes('cegła'))) {
       wallTex = createBrickTexture(wallColor);
     } else if (explicitWallTexture === 'slats' || (!explicitWallTexture && wallTypeStr.includes('lamele'))) {
       wallTex = createWoodSlatsTexture(wallColor);
@@ -1601,7 +1677,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     artGroup.position.set(0, 1.7, -halfL + 0.02);
     roomGroup.add(artGroup);
 
-  }, [room, showCeiling, cutawayWalls, photoDisplayMode, resolvedPhotoSrc, overlayFloorMode]);
+  }, [room, showCeiling, cutawayWalls, photoDisplayMode, resolvedPhotoSrc, overlayFloorMode, customFloorPhotoSrc, customWallPhotoSrc]);
 
   // Update selection highlight ring and bracket when selectedFurnitureId or room.furniture changes
   useEffect(() => {
@@ -1795,6 +1871,22 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
         accept="image/*"
         className="hidden"
         onChange={handlePhotoUpload}
+      />
+
+      {/* Hidden File Inputs for Material Swatches */}
+      <input
+        ref={floorSwatchInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFloorSwatchUpload}
+      />
+      <input
+        ref={wallSwatchInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleWallSwatchUpload}
       />
 
       {/* Mode 1 & Mode 3: Photo Background underlay when photoDisplayMode is 'photo_overlay' or 'split_compare' */}
@@ -2392,7 +2484,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
           {/* Tab 1: Posadzka */}
           {quickRemodelTab === 'floors' && (
             <div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2.5">
                 {FLOOR_PRESETS.map((p) => {
                   const isSelected = room.design.floorTexture === p.floorTexture || room.design.floorType === p.floorType;
                   return (
@@ -2419,6 +2511,57 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                     </button>
                   );
                 })}
+
+                {/* Custom User Floor Swatch from Store */}
+                {customFloorPhotoSrc ? (
+                  <button
+                    onClick={() => {
+                      if (!onUpdateRoomDesign) return;
+                      onUpdateRoomDesign(room.id, {
+                        ...room.design,
+                        floorType: 'Własny próbnik ze sklepu',
+                      });
+                    }}
+                    className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
+                      room.design.floorType === 'Własny próbnik ze sklepu'
+                        ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
+                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                    }`}
+                  >
+                    <img
+                      src={customFloorPhotoSrc}
+                      alt="Własny próbnik"
+                      className="w-10 h-10 rounded-xl border border-teal-400/50 mb-2 object-cover shadow-inner"
+                    />
+                    <span className="text-xs font-bold text-teal-300 leading-tight">Twój Próbnik</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">Ze zdjęcia</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        floorSwatchInputRef.current?.click();
+                      }}
+                      className="mt-1 text-[10px] text-teal-400 underline hover:text-teal-300"
+                    >
+                      Zmień foto
+                    </button>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => floorSwatchInputRef.current?.click()}
+                    disabled={isUploadingSwatch}
+                    className="flex flex-col items-center justify-center p-2.5 rounded-2xl border border-dashed border-teal-500/60 bg-teal-950/20 hover:bg-teal-900/30 text-center transition active:scale-95 group"
+                    title="Zrób zdjęcie próbki paneli lub płytek w sklepie budowlanym i zobacz ją na podłodze 3D"
+                  >
+                    <div className="w-10 h-10 rounded-xl border border-teal-400/40 bg-teal-500/20 flex items-center justify-center mb-2 shadow-inner group-hover:scale-105 transition text-teal-300">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-bold text-teal-300 leading-tight">
+                      {isUploadingSwatch ? 'Kompresja...' : '+ Próbnik ze sklepu'}
+                    </span>
+                    <span className="text-[10px] text-teal-400/80 mt-0.5">Foto płytki / paneli</span>
+                  </button>
+                )}
               </div>
 
               {/* Instant Floor-to-BOM HUD widget */}
@@ -2458,7 +2601,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
 
           {/* Tab 2: Ściany */}
           {quickRemodelTab === 'walls' && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
               {WALL_PRESETS.map((w) => {
                 const isSelected = room.design.wallTexture === w.wallTexture || room.design.wallType === w.wallType;
                 return (
@@ -2485,6 +2628,57 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                   </button>
                 );
               })}
+
+              {/* Custom User Wall Swatch from Store */}
+              {customWallPhotoSrc ? (
+                <button
+                  onClick={() => {
+                    if (!onUpdateRoomDesign) return;
+                    onUpdateRoomDesign(room.id, {
+                      ...room.design,
+                      wallType: 'Własny próbnik ze sklepu',
+                    });
+                  }}
+                  className={`flex flex-col items-center p-2.5 rounded-2xl border text-center transition active:scale-95 ${
+                    room.design.wallType === 'Własny próbnik ze sklepu'
+                      ? 'border-teal-400 bg-teal-950/40 ring-2 ring-teal-400/40'
+                      : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900'
+                  }`}
+                >
+                  <img
+                    src={customWallPhotoSrc}
+                    alt="Własny próbnik ściany"
+                    className="w-10 h-10 rounded-xl border border-teal-400/50 mb-2 object-cover shadow-inner"
+                  />
+                  <span className="text-xs font-bold text-teal-300 leading-tight">Twój Próbnik</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">Ze zdjęcia</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      wallSwatchInputRef.current?.click();
+                    }}
+                    className="mt-1 text-[10px] text-teal-400 underline hover:text-teal-300"
+                  >
+                    Zmień foto
+                  </button>
+                </button>
+              ) : (
+                <button
+                  onClick={() => wallSwatchInputRef.current?.click()}
+                  disabled={isUploadingSwatch}
+                  className="flex flex-col items-center justify-center p-2.5 rounded-2xl border border-dashed border-teal-500/60 bg-teal-950/20 hover:bg-teal-900/30 text-center transition active:scale-95 group"
+                  title="Zrób zdjęcie próbki tapety, cegły lub farby i zobacz ją na ścianie 3D"
+                >
+                  <div className="w-10 h-10 rounded-xl border border-teal-400/40 bg-teal-500/20 flex items-center justify-center mb-2 shadow-inner group-hover:scale-105 transition text-teal-300">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-bold text-teal-300 leading-tight">
+                    {isUploadingSwatch ? 'Kompresja...' : '+ Próbnik ze sklepu'}
+                  </span>
+                  <span className="text-[10px] text-teal-400/80 mt-0.5">Foto tapety / cegły</span>
+                </button>
+              )}
             </div>
           )}
 

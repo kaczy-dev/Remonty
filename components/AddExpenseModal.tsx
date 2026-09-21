@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Expense, ExpenseCategory, Room } from '@/types/renovation';
 import { X, Wallet, Camera } from 'lucide-react';
 import { savePhotoBlob } from '@/lib/db/photos';
+import { compressImage } from '@/lib/image-compressor';
 
 interface AddExpenseModalProps {
   isOpen: boolean;
@@ -82,33 +83,48 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !amount || Number(amount) <= 0) return;
+    if (!title.trim() || !amount || Number(amount) <= 0 || isSubmitting) return;
 
-    const id = crypto.randomUUID();
-    let receiptPhotoId: string | undefined;
-    if (receiptFile) {
-      const photoId = `expense-${id}`;
-      await savePhotoBlob(photoId, receiptFile);
-      receiptPhotoId = photoId;
+    try {
+      setIsSubmitting(true);
+      const id = crypto.randomUUID();
+      let receiptPhotoId: string | undefined;
+      if (receiptFile) {
+        const photoId = `expense-${id}`;
+        const compressed = await compressImage(receiptFile, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.85,
+          mimeType: 'image/webp',
+        });
+        await savePhotoBlob(photoId, compressed);
+        receiptPhotoId = photoId;
+      }
+
+      const newExpense: Expense = {
+        id,
+        title: title.trim(),
+        amount: Number(amount),
+        category,
+        roomId: roomId || undefined,
+        date,
+        paid,
+        paymentMethod,
+        receiptNote: receiptNote.trim() || undefined,
+        receiptPhotoId,
+      };
+
+      onAddExpense(newExpense);
+      onClose();
+    } catch (err) {
+      console.error('Błąd zapisu wydatku / kompresji paragonu:', err);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const newExpense: Expense = {
-      id,
-      title: title.trim(),
-      amount: Number(amount),
-      category,
-      roomId: roomId || undefined,
-      date,
-      paid,
-      paymentMethod,
-      receiptNote: receiptNote.trim() || undefined,
-      receiptPhotoId,
-    };
-
-    onAddExpense(newExpense);
-    onClose();
   };
 
   return (
@@ -306,9 +322,10 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-sm"
+              disabled={isSubmitting}
+              className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-500 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Zapisz Wydatek
+              {isSubmitting ? 'Zapisywanie...' : 'Zapisz Wydatek'}
             </button>
           </div>
         </form>

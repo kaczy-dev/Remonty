@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Expense, Room } from '@/types/renovation';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db/usePhotoSrc';
 import { savePhotoBlob } from '@/lib/db/photos';
+import { compressImage } from '@/lib/image-compressor';
 import {
   X,
   Receipt,
@@ -71,10 +72,18 @@ export const ReceiptViewerModal: React.FC<ReceiptViewerModalProps> = ({
     try {
       setIsUploading(true);
       const photoId = `expense-${expense.id}`;
-      await savePhotoBlob(photoId, file);
+      const compressed = await compressImage(file, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85,
+        mimeType: 'image/webp',
+      });
+      await savePhotoBlob(photoId, compressed);
       if (onUpdateExpenseReceipt) {
         onUpdateExpenseReceipt(expense.id, photoId);
       }
+    } catch (err) {
+      console.error('Błąd zapisu paragonu:', err);
     } finally {
       setIsUploading(false);
     }
