@@ -286,33 +286,54 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   }, [room, onUpdateFurniture]);
 
   // Photo & Remodel Mode state
-  const [photoDisplayMode, setPhotoDisplayMode] = useState<RemodelPhotoViewMode>('3d_mesh');
+  const [photoDisplayMode, setPhotoDisplayMode] = useState<RemodelPhotoViewMode>(
+    room.photoUrl ? 'photo_overlay' : '3d_mesh'
+  );
   const photoDisplayModeRef = useRef<RemodelPhotoViewMode>(photoDisplayMode);
   useEffect(() => {
     photoDisplayModeRef.current = photoDisplayMode;
   }, [photoDisplayMode]);
 
-  const [photoBlendOpacity, setPhotoBlendOpacity] = useState<number>(75);
+  const [photoBlendOpacity, setPhotoBlendOpacity] = useState<number>(
+    room.design.photoBlendOpacity !== undefined ? room.design.photoBlendOpacity : 75
+  );
   const [splitSliderPos, setSplitSliderPos] = useState<number>(50);
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
   const [showQuickRemodel, setShowQuickRemodel] = useState(false);
   const [quickRemodelTab, setQuickRemodelTab] = useState<'floors' | 'walls' | 'furniture' | 'light'>('floors');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Perspective Calibration & Camera Match state
   const [showPerspectiveMatch, setShowPerspectiveMatch] = useState<boolean>(false);
   const [showVanishingGrid, setShowVanishingGrid] = useState<boolean>(false);
-  const [cameraFov, setCameraFov] = useState<number>(60);
-  const [cameraHeightVal, setCameraHeightVal] = useState<number>(1.55);
-  const [cameraPitchVal, setCameraPitchVal] = useState<number>(-12);
-  const [cameraYawVal, setCameraYawVal] = useState<number>(0);
-  const [cameraDistVal, setCameraDistVal] = useState<number>(() => Math.max(room.width, room.length) * 1.15);
+  const [hasSavedPerspective, setHasSavedPerspective] = useState<boolean>(false);
+
+  const [cameraFov, setCameraFov] = useState<number>(
+    room.design.perspectiveFov !== undefined ? room.design.perspectiveFov : 60
+  );
+  const [cameraHeightVal, setCameraHeightVal] = useState<number>(
+    room.design.perspectiveHeight !== undefined ? room.design.perspectiveHeight : 1.55
+  );
+  const [cameraPitchVal, setCameraPitchVal] = useState<number>(
+    room.design.perspectivePitch !== undefined ? room.design.perspectivePitch : -12
+  );
+  const [cameraYawVal, setCameraYawVal] = useState<number>(
+    room.design.perspectiveYaw !== undefined ? room.design.perspectiveYaw : 0
+  );
+  const [cameraDistVal, setCameraDistVal] = useState<number>(
+    () => (room.design.perspectiveDist !== undefined ? room.design.perspectiveDist : Math.max(room.width, room.length) * 1.15)
+  );
 
   // AR Overlay Mode: 'full_floor' (nowa posadzka) vs 'furniture_shadows_only' (oryginalna podłoga ze zdjęcia + cienie mebli)
-  const [overlayFloorMode, setOverlayFloorMode] = useState<'full_floor' | 'furniture_shadows_only'>('full_floor');
+  const [overlayFloorMode, setOverlayFloorMode] = useState<'full_floor' | 'furniture_shadows_only'>(
+    room.design.overlayFloorMode || 'full_floor'
+  );
 
   // Sun Light Direction to match real room windows
-  const [windowLightDirection, setWindowLightDirection] = useState<'left' | 'center' | 'right' | 'front'>('right');
+  const [windowLightDirection, setWindowLightDirection] = useState<'left' | 'center' | 'right' | 'front'>(
+    room.design.windowLightDirection || 'right'
+  );
 
   // Floor BOM / Cost Estimate HUD
   const [showFloorBomHud, setShowFloorBomHud] = useState<boolean>(false);
@@ -556,6 +577,30 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     applyCameraPerspective(fov, height, pitch, yaw, dist);
   };
 
+  const handleSavePerspective = () => {
+    if (!onUpdateRoomDesign) return;
+    onUpdateRoomDesign(room.id, {
+      ...room.design,
+      perspectiveFov: cameraFov,
+      perspectiveHeight: cameraHeightVal,
+      perspectivePitch: cameraPitchVal,
+      perspectiveYaw: cameraYawVal,
+      perspectiveDist: cameraDistVal,
+      overlayFloorMode,
+      windowLightDirection,
+      photoBlendOpacity,
+    });
+    setHasSavedPerspective(true);
+    setTimeout(() => setHasSavedPerspective(false), 2500);
+  };
+
+  const handleSwitchPhotoDisplayMode = (mode: RemodelPhotoViewMode) => {
+    setPhotoDisplayMode(mode);
+    if (mode === 'photo_overlay' || mode === 'split_compare') {
+      applyCameraPerspective(cameraFov, cameraHeightVal, cameraPitchVal, cameraYawVal, cameraDistVal);
+    }
+  };
+
   // Smooth camera transition ref
   const cameraTransitionRef = useRef<{
     targetPos: THREE.Vector3;
@@ -665,9 +710,23 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     controls.dampingFactor = 0.05;
     controls.maxPolarAngle = Math.PI / 2 + 0.02;
     controls.minDistance = 1.0;
-    controls.maxDistance = 25.0;
     controls.target.set(0, roomRef.current.height * 0.45, 0);
     controlsRef.current = controls;
+
+    if (photoDisplayModeRef.current === 'photo_overlay' || photoDisplayModeRef.current === 'split_compare') {
+      const fov = roomRef.current.design.perspectiveFov ?? 60;
+      const h = roomRef.current.design.perspectiveHeight ?? 1.55;
+      const pitch = roomRef.current.design.perspectivePitch ?? -12;
+      const yaw = roomRef.current.design.perspectiveYaw ?? 0;
+      const dist = roomRef.current.design.perspectiveDist ?? Math.max(roomRef.current.width, roomRef.current.length) * 1.15;
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+      const radYaw = THREE.MathUtils.degToRad(yaw);
+      const radPitch = THREE.MathUtils.degToRad(pitch);
+      camera.position.set(Math.sin(radYaw) * dist, Math.max(0.35, h), Math.cos(radYaw) * dist);
+      controls.target.set(0, Math.max(0.05, h + Math.tan(radPitch) * (dist * 0.7)), 0);
+      controls.update();
+    }
 
     // 5. Lights Container
     const lightsGroup = new THREE.Group();
@@ -1803,8 +1862,21 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
             const bgImg = new Image();
             bgImg.crossOrigin = 'anonymous';
             bgImg.onload = () => {
-              // Draw background photo scaled to cover
-              ctx.drawImage(bgImg, 0, 0, compCanvas.width, compCanvas.height);
+              // Draw background photo scaled to cover (preserving aspect ratio)
+              const imgRatio = bgImg.width / bgImg.height;
+              const canvasRatio = compCanvas.width / compCanvas.height;
+              let drawW = compCanvas.width;
+              let drawH = compCanvas.height;
+              let drawX = 0;
+              let drawY = 0;
+              if (imgRatio > canvasRatio) {
+                drawW = compCanvas.height * imgRatio;
+                drawX = (compCanvas.width - drawW) / 2;
+              } else {
+                drawH = compCanvas.width / imgRatio;
+                drawY = (compCanvas.height - drawH) / 2;
+              }
+              ctx.drawImage(bgImg, drawX, drawY, drawW, drawH);
               
               if (photoDisplayMode === 'photo_overlay') {
                 ctx.globalAlpha = photoBlendOpacity / 100;
@@ -1864,11 +1936,21 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   return (
     <div className={`relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl select-none ${className}`}>
       
-      {/* Hidden File Input for Room Photo Upload */}
+      {/* Hidden File Input for Room Photo Upload from Gallery/Disk */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        className="hidden"
+        onChange={handlePhotoUpload}
+      />
+
+      {/* Hidden File Input for Live Camera Capture on Mobile */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         className="hidden"
         onChange={handlePhotoUpload}
       />
@@ -2225,7 +2307,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
           {resolvedPhotoSrc ? (
             <div className="flex items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/90 p-1 backdrop-blur-md shadow-lg">
               <button
-                onClick={() => setPhotoDisplayMode('3d_mesh')}
+                onClick={() => handleSwitchPhotoDisplayMode('3d_mesh')}
                 className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
                   photoDisplayMode === '3d_mesh'
                     ? 'bg-teal-600 text-white shadow-xs'
@@ -2237,7 +2319,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                 <span className="hidden sm:inline">Model 3D</span>
               </button>
               <button
-                onClick={() => setPhotoDisplayMode('photo_overlay')}
+                onClick={() => handleSwitchPhotoDisplayMode('photo_overlay')}
                 className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
                   photoDisplayMode === 'photo_overlay'
                     ? 'bg-teal-600 text-white shadow-xs'
@@ -2249,7 +2331,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                 <span className="hidden sm:inline">Podkład AR</span>
               </button>
               <button
-                onClick={() => setPhotoDisplayMode('photo_wall')}
+                onClick={() => handleSwitchPhotoDisplayMode('photo_wall')}
                 className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
                   photoDisplayMode === 'photo_wall'
                     ? 'bg-teal-600 text-white shadow-xs'
@@ -2261,7 +2343,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                 <span className="hidden sm:inline">Ściana Foto</span>
               </button>
               <button
-                onClick={() => setPhotoDisplayMode('split_compare')}
+                onClick={() => handleSwitchPhotoDisplayMode('split_compare')}
                 className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
                   photoDisplayMode === 'split_compare'
                     ? 'bg-teal-600 text-white shadow-xs'
@@ -2273,12 +2355,21 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
                 <span className="hidden sm:inline">Przed / Po</span>
               </button>
 
-              {/* Change Photo Button */}
+              {/* Change Photo Buttons (Camera & File) */}
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={isCompressingPhoto}
+                className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[11px] text-slate-300 ml-1 transition"
+                title="Zrób nowe zdjęcie aparatem"
+              >
+                <Camera className="w-3.5 h-3.5 text-teal-400" />
+                <span className="hidden md:inline">Aparat</span>
+              </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isCompressingPhoto}
-                className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[11px] text-slate-300 ml-1 transition"
-                title="Zmień wgrane zdjęcie pokoju"
+                className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[11px] text-slate-300 transition"
+                title="Wybierz inne zdjęcie z galerii"
               >
                 <img
                   src={resolvedPhotoSrc}
@@ -2289,15 +2380,26 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isCompressingPhoto}
-              className="flex items-center gap-1.5 rounded-2xl border border-teal-500/60 bg-gradient-to-r from-teal-600 to-cyan-700 hover:brightness-110 px-3.5 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition active:scale-95"
-              title="Wgraj realne zdjęcie pokoju, aby remontować je w 3D"
-            >
-              <UploadCloud className="w-4 h-4 text-teal-200" />
-              <span>{isCompressingPhoto ? 'Kompresja...' : 'Wgraj zdjęcie pokoju'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={isCompressingPhoto}
+                className="flex items-center gap-1.5 rounded-2xl border border-teal-500/60 bg-gradient-to-r from-teal-600 to-cyan-700 hover:brightness-110 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition active:scale-95"
+                title="Zrób zdjęcie pokoju aparatem telefonu i zobacz remont na żywo"
+              >
+                <Camera className="w-4 h-4 text-teal-200" />
+                <span>{isCompressingPhoto ? 'Kompresja...' : 'Aparat'}</span>
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isCompressingPhoto}
+                className="flex items-center gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/90 hover:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-200 shadow-lg backdrop-blur-md transition active:scale-95"
+                title="Wgraj zdjęcie pokoju z dysku / galerii"
+              >
+                <UploadCloud className="w-4 h-4 text-teal-300" />
+                <span>Z pliku</span>
+              </button>
+            </div>
           )}
 
           {/* Quick Remodel Toggle Button */}
@@ -2953,6 +3055,30 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
               {showVanishingGrid ? 'Włączona' : 'Wyłączona'}
             </button>
           </div>
+
+          {/* Save Calibration Button */}
+          {onUpdateRoomDesign && (
+            <button
+              onClick={handleSavePerspective}
+              className={`w-full mt-3 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs shadow-lg transition active:scale-95 ${
+                hasSavedPerspective
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 text-slate-950'
+              }`}
+            >
+              {hasSavedPerspective ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Dopasowanie zapisane w projekcie!</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Zapisz tę perspektywę dla pokoju</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
 

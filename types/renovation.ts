@@ -57,6 +57,15 @@ export interface RoomDesignPreset {
   lightingTempK: number; // 2700 (warm), 4000 (neutral), 6000 (cool)
   customFloorPhotoUrl?: string; // Custom tile or wood swatch photo uploaded by user
   customWallPhotoUrl?: string; // Custom wallpaper or wall swatch photo uploaded by user
+  perspectiveFov?: number;
+  perspectiveHeight?: number;
+  perspectivePitch?: number;
+  perspectiveYaw?: number;
+  perspectiveDist?: number;
+  perspectivePreset?: string;
+  overlayFloorMode?: 'full_floor' | 'furniture_shadows_only';
+  windowLightDirection?: 'left' | 'center' | 'right' | 'front';
+  photoBlendOpacity?: number;
 }
 
 export interface RoomWorkStage {
