@@ -30,7 +30,107 @@ import {
   BarChart3,
   Clock,
   AlertTriangle,
+  MapPin,
+  Camera,
 } from 'lucide-react';
+import { usePhotoSrc } from '@/lib/db';
+
+interface RoomReportPunchListCardProps {
+  room: RenovationProject['rooms'][number];
+  qaItems: RenovationProject['qaChecklist'];
+}
+
+const RoomReportPunchListCard: React.FC<RoomReportPunchListCardProps> = ({ room, qaItems }) => {
+  const afterSrc = usePhotoSrc(room.afterPhotoUrl);
+  const beforeSrc = usePhotoSrc(room.beforePhotoUrl);
+  const roomSrc = usePhotoSrc(room.photoUrl);
+
+  const roomPins = qaItems.filter(
+    (q) => (!q.roomId || q.roomId === room.id) && q.pinX !== undefined && q.pinY !== undefined
+  );
+
+  const displayPhoto = afterSrc || roomSrc || beforeSrc;
+
+  if (!displayPhoto && roomPins.length === 0) return null;
+
+  return (
+    <div className="mb-6 p-4 rounded-xl border border-slate-300 bg-white print-avoid-break">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3">
+        <div>
+          <h5 className="text-xs font-bold text-slate-900 uppercase">
+            Pomieszczenie: {room.name}
+          </h5>
+          <span className="text-[10px] text-slate-500 font-mono">
+            {room.width.toFixed(2)}m × {room.length.toFixed(2)}m • Powierzchnia: {room.area.toFixed(2)} m²
+          </span>
+        </div>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-slate-100 border border-slate-300 text-slate-700">
+          Zarejestrowane wady ze zdjęć: {roomPins.length}
+        </span>
+      </div>
+
+      {displayPhoto && (
+        <div className="relative w-full aspect-video max-h-72 rounded-lg overflow-hidden border border-slate-300 bg-slate-900 mb-3 select-none">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={displayPhoto}
+            alt={`Fotografia inspekcyjna - ${room.name}`}
+            className="w-full h-full object-cover"
+          />
+
+          {/* Rendered Pins */}
+          {roomPins.map((item, idx) => (
+            <div
+              key={item.id}
+              style={{ left: `${item.pinX}%`, top: `${item.pinY}%` }}
+              className="absolute -translate-x-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-6 h-6 rounded-full font-bold text-[10px] text-white shadow-md border border-white bg-rose-600"
+            >
+              {idx + 1}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pins Legend Table */}
+      {roomPins.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-[10px]">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300 text-slate-700">
+                <th className="py-1 px-1.5 font-bold w-8 text-center">Nr</th>
+                <th className="py-1 px-1.5 font-semibold">Opis Wady / Usterki</th>
+                <th className="py-1 px-1.5 font-semibold">Norma Budowlana</th>
+                <th className="py-1 px-1.5 font-semibold">Dopuszczalna Tolerancja</th>
+                <th className="py-1 px-1.5 font-semibold text-center w-20">Status</th>
+                <th className="py-1 px-1.5 font-semibold text-center w-28">Termin Usunięcia</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {roomPins.map((item, idx) => (
+                <tr key={item.id} className={item.status === 'failed' ? 'bg-rose-50/50' : ''}>
+                  <td className="py-1 px-1.5 font-bold text-center text-rose-700">{idx + 1}</td>
+                  <td className="py-1 px-1.5 font-medium text-slate-900">{item.title}</td>
+                  <td className="py-1 px-1.5 font-mono text-slate-600">{item.standardNorm}</td>
+                  <td className="py-1 px-1.5 text-slate-600">{item.toleranceGuide}</td>
+                  <td className="py-1 px-1.5 text-center font-bold">
+                    {item.status === 'passed' ? (
+                      <span className="text-emerald-700">USUNIĘTA</span>
+                    ) : (
+                      <span className="text-rose-700 font-bold">DO POPRAWKI</span>
+                    )}
+                  </td>
+                  <td className="py-1 px-1.5 text-center text-slate-700 font-mono">
+                    14 dni roboczych
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface ReportGeneratorModalProps {
   isOpen: boolean;
@@ -51,6 +151,7 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
   const [includeContractors, setIncludeContractors] = useState(true);
   const [includeExpenses, setIncludeExpenses] = useState(true);
   const [includeQA, setIncludeQA] = useState(true);
+  const [includeDefectPhotos, setIncludeDefectPhotos] = useState(true);
 
   const [investorName, setInvestorName] = useState('Inwestor / Właściciel lokalu');
   const [contractorName, setContractorName] = useState('Renowacje u Kaczaka - Wykonawca');
@@ -296,6 +397,16 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                     className="rounded-sm border-slate-700 text-teal-600 focus:ring-teal-500"
                   />
                   <span>Normy QA & Protokół odbioru</span>
+                </label>
+
+                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeDefectPhotos}
+                    onChange={(e) => setIncludeDefectPhotos(e.target.checked)}
+                    className="rounded-sm border-slate-700 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Fotografie pomieszczeń & Wady na zdjęciach</span>
                 </label>
               </div>
 
@@ -691,6 +802,15 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                       8. Protokół Odbioru Technicznego i Normy PN-EN / ITB
                     </h4>
 
+                    {/* Room Photos with Defect Pins if enabled */}
+                    {includeDefectPhotos && (
+                      <div className="space-y-4 mb-4">
+                        {filteredRooms.map((r) => (
+                          <RoomReportPunchListCard key={r.id} room={r} qaItems={filteredQA} />
+                        ))}
+                      </div>
+                    )}
+
                     {filteredQA.length === 0 ? (
                       <div className="text-[11px] text-slate-500 italic p-2 bg-slate-50 rounded-lg">
                         Brak punktów kontrolnych QA w projekcie.
@@ -727,6 +847,11 @@ export const ReportGeneratorModal: React.FC<ReportGeneratorModalProps> = ({
                         </table>
                       </div>
                     )}
+
+                    {/* Official Technical Acceptance Handover Clause */}
+                    <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-300 text-[11px] text-slate-700 leading-relaxed">
+                      <strong>Oświadczenie Odbiorowe:</strong> Strony potwierdzają stan faktyczny wykonanych robót wykończeniowych zgodnie z powyższą listą kontrolną i protokołem fotograficznym wad. Wykonawca zobowiązuje się do bezpłatnego usunięcia wykazanych usterek w terminie do <strong>14 dni roboczych</strong> od daty sporządzenia niniejszego protokołu. Po usunięciu usterek sporządzony zostanie końcowy protokół bezusterkowego odbioru lokalu.
+                    </div>
                   </div>
                 )}
 
