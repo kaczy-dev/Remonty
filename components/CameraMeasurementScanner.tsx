@@ -13,8 +13,20 @@ import {
   Info,
   Layers,
   Undo2,
-  Trash2
+  Trash2,
+  Flashlight,
+  FlashlightOff,
+  Pause,
+  Play,
+  Compass,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react';
+import { MagnifierLoupe } from './MagnifierLoupe';
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 
 interface CameraMeasurementScannerProps {
   roomWidth: number;
@@ -34,10 +46,10 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   onApplyMeasuredDimensions,
   className = '',
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const frozenCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // Guards against a race between the mount effect and a manual startCamera() call:
-  // only the most recently issued request is allowed to assign streamRef/video.
   const cameraRequestIdRef = useRef(0);
 
   // Camera & Stream states
@@ -45,10 +57,23 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
-  // Scanner Tool Mode (2-Point Laser vs Multi-Point Polygon Floor/Wall Outline)
+  // Freeze Frame (Still photo capture mode for jitter-free measurement on ladder)
+  const [isFrozen, setIsFrozen] = useState<boolean>(false);
+
+  // Hardware Torch state
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [isTorchSupported, setIsTorchSupported] = useState<boolean>(false);
+
+  // Container dimensions for responsive Magnifier Loupe positioning
+  const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
+
+  // Virtual Bubble Level (Device Orientation)
+  const orientation = useDeviceOrientation();
+
+  // Scanner Tool Mode (2-Point Laser vs Multi-Point Polygon Outline)
   const [scannerToolMode, setScannerToolMode] = useState<ScannerToolMode>('laser_2pt');
 
-  // Fixed grid overlay preset (cosmetic controls removed — no measurement impact)
+  // Fixed grid overlay preset
   const gridDensity = 20;
   const gridOpacity = 0.55;
   const gridColor = '#2dd4bf'; // teal
@@ -59,6 +84,12 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const [pointA, setPointA] = useState<{ x: number; y: number } | null>({ x: 25, y: 50 });
   const [pointB, setPointB] = useState<{ x: number; y: number } | null>({ x: 75, y: 50 });
   const [activeDraggingPoint, setActiveDraggingPoint] = useState<'A' | 'B' | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<'A' | 'B' | number>('A');
+
+  // Laser history stack for Undo
+  const [laserHistory, setLaserHistory] = useState<
+    Array<{ pointA: { x: number; y: number }; pointB: { x: number; y: number } }>
+  >([]);
 
   // Multi-point polygon tracing vertices (percentages 0..100)
   const [polygonPoints, setPolygonPoints] = useState<Array<{ id: string; x: number; y: number }>>([
@@ -71,13 +102,40 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   // Calibration Scale (Estimated ratio meters per frame width at typical ~2.5m distance)
   const [estimatedDistanceMeters, setEstimatedDistanceMeters] = useState<number>(2.6);
-  const [calibratedFovAngle, setCalibratedFovAngle] = useState<number>(68); // Typical smartphone camera horizontal FOV ~65-72 deg
+  const [calibratedFovAngle, setCalibratedFovAngle] = useState<number>(68);
 
   // Width of visible frame at distance D: W_visible = 2 * D * tan(FOV/2)
   const visibleFrameWidthMeters = 2 * estimatedDistanceMeters * Math.tan((calibratedFovAngle * Math.PI) / 360);
   const aspect = 16 / 9;
   const visibleFrameHeightMeters = visibleFrameWidthMeters / aspect;
-  
+
+  const updateContainerRect = useCallback(() => {
+    if (containerRef.current) {
+      setContainerRect(containerRef.current.getBoundingClientRect());
+    }
+  }, []);
+
+  useEffect(() => {
+    updateContainerRect();
+    window.addEventListener('resize', updateContainerRect);
+    return () => window.removeEventListener('resize', updateContainerRect);
+  }, [updateContainerRect]);
+
+  // Record laser state for Undo
+  const pushLaserHistory = useCallback(() => {
+    if (pointA && pointB) {
+      setLaserHistory((prev) => [...prev.slice(-15), { pointA: { ...pointA }, pointB: { ...pointB } }]);
+    }
+  }, [pointA, pointB]);
+
+  const handleUndoLaser = () => {
+    if (laserHistory.length === 0) return;
+    const last = laserHistory[laserHistory.length - 1];
+    setLaserHistory((prev) => prev.slice(0, -1));
+    setPointA(last.pointA);
+    setPointB(last.pointB);
+  };
+
   // 2-Point Laser Distance
   const calculateRealDistance = useCallback((): number => {
     if (!pointA || !pointB) return 0;
@@ -133,7 +191,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   // Stop Camera Stream
   const stopCamera = useCallback(() => {
-    cameraRequestIdRef.current += 1; // invalidate any in-flight startCamera() request
+    cameraRequestIdRef.current += 1;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -142,24 +200,22 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       videoRef.current.srcObject = null;
     }
     setIsStreaming(false);
+    setIsTorchOn(false);
+    setIsTorchSupported(false);
   }, []);
 
-  // Start Camera Stream via navigator.mediaDevices.getUserMedia.
-  // Every call is tagged with a request id; if a newer call started while this one
-  // was awaiting permission/hardware, this one's stream is stopped instead of being
-  // assigned — this is what prevents the mount-effect/manual-toggle stream leak.
+  // Start Camera Stream via navigator.mediaDevices.getUserMedia
   const startCamera = useCallback(async (mode: 'environment' | 'user' = facingMode) => {
     setCameraError(null);
     const requestId = ++cameraRequestIdRef.current;
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError('Twoja przeglądarka lub środowisko nie obsługuje interfejsu navigator.mediaDevices.getUserMedia.');
+      setCameraError('Twoja przeglądarka lub środowisko nie obsługuje kamery internetowej.');
       return;
     }
 
     const applyStream = (stream: MediaStream, resolvedMode: 'environment' | 'user') => {
       if (requestId !== cameraRequestIdRef.current) {
-        // A newer request superseded this one — discard this stream instead of leaking it.
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
@@ -167,13 +223,25 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
       streamRef.current = stream;
+
+      // Check torch capability
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        // @ts-expect-error torch capability check
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        // @ts-expect-error torch capability check
+        setIsTorchSupported(Boolean(caps.torch));
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
           if (requestId === cameraRequestIdRef.current) {
             videoRef.current?.play().catch(() => {});
             setIsStreaming(true);
+            setIsFrozen(false);
             if (resolvedMode !== mode) setFacingMode(resolvedMode);
+            updateContainerRect();
           }
         };
       }
@@ -193,7 +261,6 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       applyStream(stream, mode);
     } catch (err: unknown) {
       console.warn('Camera access issue:', err);
-      // If environment camera failed, try user/webcam fallback
       if (mode === 'environment') {
         try {
           const fallbackStream = await navigator.mediaDevices.getUserMedia({
@@ -203,18 +270,18 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
           applyStream(fallbackStream, 'user');
           return;
         } catch {
-          // Fall through to error handler
+          // Fall through
         }
       }
 
       if (requestId !== cameraRequestIdRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Brak dostępu do kamery';
       setCameraError(
-        `Nie udało się uruchomić kamery (${errorMessage}). Upewnij się, że zezwolono na dostęp do kamery w przeglądarce.`
+        `Nie udało się uruchomić kamery (${errorMessage}). Upewnij się, że przyznano uprawnienia do aparatu.`
       );
       setIsStreaming(false);
     }
-  }, [facingMode]);
+  }, [facingMode, updateContainerRect]);
 
   // Switch facing mode (back/front camera)
   const handleToggleCamera = () => {
@@ -223,12 +290,76 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     startCamera(newMode);
   };
 
-  // Automatically start camera when component mounts
+  // Toggle Torch
+  const handleToggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const nextState = !isTorchOn;
+      // @ts-expect-error advanced torch constraint in modern browsers
+      await track.applyConstraints({ advanced: [{ torch: nextState }] });
+      setIsTorchOn(nextState);
+    } catch (err) {
+      console.warn('Torch toggle failed', err);
+    }
+  };
+
+  // Freeze / Unfreeze Frame for jitter-free measurement on ladder
+  const handleToggleFreeze = () => {
+    if (isFrozen) {
+      setIsFrozen(false);
+    } else {
+      if (videoRef.current && frozenCanvasRef.current) {
+        const v = videoRef.current;
+        const c = frozenCanvasRef.current;
+        c.width = v.videoWidth || v.clientWidth || 1280;
+        c.height = v.videoHeight || v.clientHeight || 720;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          setIsFrozen(true);
+        }
+      }
+    }
+  };
+
+  // D-pad micro-step adjustments (+/- 0.3% ≈ 2-3 mm)
+  const handleNudgePoint = (dxPercent: number, dyPercent: number) => {
+    if (scannerToolMode === 'laser_2pt') {
+      const target = selectedPoint === 'B' ? 'B' : 'A';
+      pushLaserHistory();
+      if (target === 'A' && pointA) {
+        setPointA({
+          x: Math.max(1, Math.min(99, Math.round((pointA.x + dxPercent) * 10) / 10)),
+          y: Math.max(1, Math.min(99, Math.round((pointA.y + dyPercent) * 10) / 10)),
+        });
+      } else if (target === 'B' && pointB) {
+        setPointB({
+          x: Math.max(1, Math.min(99, Math.round((pointB.x + dxPercent) * 10) / 10)),
+          y: Math.max(1, Math.min(99, Math.round((pointB.y + dyPercent) * 10) / 10)),
+        });
+      }
+    } else if (scannerToolMode === 'polygon_trace' && typeof selectedPoint === 'number') {
+      setPolygonPoints((prev) =>
+        prev.map((p, idx) =>
+          idx === selectedPoint
+            ? {
+                ...p,
+                x: Math.max(1, Math.min(99, Math.round((p.x + dxPercent) * 10) / 10)),
+                y: Math.max(1, Math.min(99, Math.round((p.y + dyPercent) * 10) / 10)),
+              }
+            : p
+        )
+      );
+    }
+  };
+
+  // Automatically start camera on mount
   useEffect(() => {
     queueMicrotask(() => startCamera('environment'));
-
     return () => {
-      cameraRequestIdRef.current += 1; // invalidate any in-flight request from this instance
+      cameraRequestIdRef.current += 1;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -239,6 +370,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   // Quick Presets for Measurement Mode
   const handleSetMeasurementMode = (mode: MeasurementMode) => {
+    pushLaserHistory();
     setActiveMeasureMode(mode);
     if (mode === 'wall_width') {
       setPointA({ x: 15, y: 50 });
@@ -252,14 +384,14 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     }
   };
 
-  // Interactive drag / click on video canvas
+  // Safe Interactive Drag with Anti-Accidental Jump Protection
   const handleContainerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
+    setContainerRect(rect);
     const clickX = ((e.clientX - rect.left) / rect.width) * 100;
     const clickY = ((e.clientY - rect.top) / rect.height) * 100;
 
     if (scannerToolMode === 'polygon_trace') {
-      // Check if clicked near an existing polygon vertex
       let closestIdx = -1;
       let minPolyDist = Infinity;
       polygonPoints.forEach((p, idx) => {
@@ -270,10 +402,13 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
         }
       });
 
-      if (minPolyDist < 6 && closestIdx !== -1) {
+      // Drag existing vertex if tapped near it (tolerance 7%)
+      if (minPolyDist < 7 && closestIdx !== -1) {
         setActiveDraggingPolyIdx(closestIdx);
+        setSelectedPoint(closestIdx);
       } else {
-        // Add new vertex to polygon
+        // Add new vertex only if explicitly clicking in blank area
+        setSelectedPoint(polygonPoints.length);
         setPolygonPoints((prev) => [
           ...prev,
           { id: `poly-${Date.now()}`, x: Math.round(clickX * 10) / 10, y: Math.round(clickY * 10) / 10 },
@@ -282,20 +417,27 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       return;
     }
 
-    // Laser 2-Point Mode
+    // Laser 2-Point Mode: Anti-accidental jump protection
     if (!pointA || !pointB) return;
 
     const distA = Math.hypot(clickX - pointA.x, clickY - pointA.y);
     const distB = Math.hypot(clickX - pointB.x, clickY - pointB.y);
 
-    if (distA < 10) {
+    if (distA < 9) {
+      pushLaserHistory();
       setActiveDraggingPoint('A');
-    } else if (distB < 10) {
+      setSelectedPoint('A');
+    } else if (distB < 9) {
+      pushLaserHistory();
       setActiveDraggingPoint('B');
-    } else if (distA < distB) {
-      setPointA({ x: Math.round(clickX * 10) / 10, y: Math.round(clickY * 10) / 10 });
+      setSelectedPoint('B');
     } else {
-      setPointB({ x: Math.round(clickX * 10) / 10, y: Math.round(clickY * 10) / 10 });
+      // If tapped outside handles, just select nearest point for D-pad adjustment WITHOUT teleporting!
+      if (distA < distB) {
+        setSelectedPoint('A');
+      } else {
+        setSelectedPoint('B');
+      }
     }
   };
 
@@ -348,7 +490,6 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const handleApplyToRoom = () => {
     if (!onApplyMeasuredDimensions) return;
     if (scannerToolMode === 'polygon_trace') {
-      // Apply polygon area to room dimensions
       const side = Math.sqrt(Math.max(1, polygonMetrics.areaM2));
       const roundedSide = Math.round(side * 100) / 100;
       onApplyMeasuredDimensions(roundedSide, roundedSide, roomHeight);
@@ -367,40 +508,54 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     }
   };
 
+  // Determine which point the loupe should magnify right now
+  const activeLoupePoint =
+    activeDraggingPoint === 'A'
+      ? pointA
+      : activeDraggingPoint === 'B'
+      ? pointB
+      : activeDraggingPolyIdx !== null
+      ? polygonPoints[activeDraggingPolyIdx]
+      : null;
+
+  const activeLoupeLabel =
+    activeDraggingPoint === 'A'
+      ? 'Punkt A'
+      : activeDraggingPoint === 'B'
+      ? 'Punkt B'
+      : activeDraggingPolyIdx !== null
+      ? `Narożnik ${activeDraggingPolyIdx + 1}`
+      : undefined;
+
   return (
     <div className={`space-y-4 ${className}`}>
-      
-      {/* Header Bar with Status & Mode Selector */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/90 p-4">
+      {/* Top Header & Quick Control Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900 border border-slate-800 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/30">
-            <Camera className="h-5 w-5" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
+            <Crosshair className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-slate-100">
-                Skaner Optyczny — Pomiar Laserowy i Obrys Wielokątny
-              </h3>
-              {isStreaming && (
-                <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 border border-emerald-500/40">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Kamera aktywna
-                </span>
-              )}
+              <h3 className="text-sm font-bold text-white">Skaner & Wirtualna Miarka Optyczna</h3>
+              <span className="flex items-center gap-1 text-[10px] font-semibold text-teal-300 bg-teal-950/80 border border-teal-500/30 px-2 py-0.5 rounded-md">
+                <Sparkles className="w-3 h-3 text-teal-400" />
+                Lupa 3× & Poziomnica
+              </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Pomiar 2-punktowy (laser) lub obrys wielokątny podłogi/ściany z realną powierzchnią i obwodem.
+            <p className="text-xs text-slate-400">
+              Pomiary na żywo lub na stopklatce z lupą dotykową i wskaźnikiem poziomu
             </p>
           </div>
         </div>
 
-        {/* Camera Controls & Tool Mode Switcher */}
-        <div className="flex items-center gap-2">
-          {/* Tool mode toggle */}
-          <div className="flex items-center rounded-xl bg-slate-950 p-1 border border-slate-800">
+        {/* Toolbar actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Tool Mode Switcher */}
+          <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
             <button
               onClick={() => setScannerToolMode('laser_2pt')}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 scannerToolMode === 'laser_2pt'
                   ? 'bg-teal-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
@@ -411,42 +566,84 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             </button>
             <button
               onClick={() => setScannerToolMode('polygon_trace')}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 scannerToolMode === 'polygon_trace'
                   ? 'bg-teal-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Wielokąt (Obrys)</span>
+              <span>Obrys Posadzki</span>
             </button>
           </div>
 
+          {/* Freeze Frame Button */}
+          {isStreaming && (
+            <button
+              type="button"
+              onClick={handleToggleFreeze}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition cursor-pointer shadow-xs ${
+                isFrozen
+                  ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                  : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+              }`}
+              title={isFrozen ? 'Wznów podgląd na żywo z kamery' : 'Zamroź kadr do spokojnego pomiaru'}
+            >
+              {isFrozen ? (
+                <>
+                  <Play className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Wznów na żywo</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Zamroź kadr</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Torch toggle */}
+          {isStreaming && !isFrozen && isTorchSupported && (
+            <button
+              type="button"
+              onClick={handleToggleTorch}
+              className={`p-2 rounded-xl border transition cursor-pointer ${
+                isTorchOn
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title={isTorchOn ? 'Wyłącz latarkę LED' : 'Włącz latarkę LED'}
+            >
+              {isTorchOn ? <Flashlight className="w-4 h-4" /> : <FlashlightOff className="w-4 h-4" />}
+            </button>
+          )}
+
+          {/* Camera Switcher (front/back) */}
+          {isStreaming && (
+            <button
+              onClick={handleToggleCamera}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 transition cursor-pointer"
+              title="Przełącz aparat (tył / przód)"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{facingMode === 'environment' ? 'Główny' : 'Przedni'}</span>
+            </button>
+          )}
+
+          {/* Camera Power Toggle */}
           {isStreaming ? (
-            <>
-              <button
-                id="toggle-camera-facing-btn"
-                onClick={handleToggleCamera}
-                title="Przełącz aparat (przód/tył)"
-                className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-teal-400" />
-                <span className="hidden sm:inline">{facingMode === 'environment' ? 'Aparat Główny' : 'Przedni'}</span>
-              </button>
-              <button
-                id="stop-camera-btn"
-                onClick={stopCamera}
-                className="flex items-center gap-1.5 rounded-xl border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 transition"
-              >
-                <VideoOff className="w-3.5 h-3.5" />
-                <span>Zatrzymaj</span>
-              </button>
-            </>
+            <button
+              onClick={stopCamera}
+              className="flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
+            >
+              <VideoOff className="w-3.5 h-3.5" />
+              <span>Wyłącz</span>
+            </button>
           ) : (
             <button
-              id="start-camera-btn"
               onClick={() => startCamera()}
-              className="flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-teal-900/30 hover:bg-teal-500 transition"
+              className="flex items-center gap-1.5 rounded-xl bg-teal-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-teal-400 transition cursor-pointer shadow-sm"
             >
               <Camera className="w-4 h-4" />
               <span>Włącz Kamerę</span>
@@ -457,11 +654,10 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
       {/* Main Viewport & Interactive Stage */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* Left: Interactive Video Viewport with SVG Grid Overlay */}
+        {/* Left: Interactive Video / Frozen Viewport */}
         <div className="lg:col-span-8 flex flex-col space-y-3">
-          
-          <div 
+          <div
+            ref={containerRef}
             className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 shadow-2xl select-none cursor-crosshair group touch-none"
             onPointerDown={handleContainerPointerDown}
             onPointerMove={handleContainerPointerMove}
@@ -474,22 +670,26 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               muted
               autoPlay
               className={`w-full h-full object-cover transition-opacity duration-300 ${
-                isStreaming ? 'opacity-100' : 'opacity-0'
+                isStreaming && !isFrozen ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
               }`}
             />
 
+            {/* Frozen Canvas for Still Measurement without camera jitter */}
+            <canvas
+              ref={frozenCanvasRef}
+              className={`w-full h-full object-cover ${isFrozen ? 'block' : 'hidden'}`}
+            />
+
             {/* Offline / Placeholder Screen if Camera Not Streaming */}
-            {!isStreaming && (
+            {!isStreaming && !isFrozen && (
               <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/90 backdrop-blur-xs space-y-3">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/30">
                   <Camera className="h-8 w-8 animate-pulse" />
                 </div>
                 <div className="max-w-md space-y-1">
-                  <h4 className="text-sm font-bold text-slate-200">
-                    Kamera jest wyłączona lub oczekuje na uprawnienia
-                  </h4>
+                  <h4 className="text-sm font-bold text-slate-200">Kamera jest wyłączona</h4>
                   <p className="text-xs text-slate-400">
-                    Kliknij przycisk poniżej, aby uruchomić podgląd na żywo z obiektywu i nałożyć precyzyjną siatkę metryczną oraz poziomnicę.
+                    Uruchom podgląd na żywo, aby dokonać precyzyjnych pomiarów laserowych lub obrysu posadzki.
                   </p>
                 </div>
                 {cameraError && (
@@ -500,17 +700,65 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 )}
                 <button
                   onClick={() => startCamera()}
-                  className="rounded-xl bg-teal-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-teal-500 transition"
+                  className="rounded-xl bg-teal-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-teal-500 transition cursor-pointer"
                 >
                   Uruchom Kamerę Urządzenia
                 </button>
               </div>
             )}
 
-            {/* ========================================================================= */}
-            {/* SVG ACCURATE REAL-TIME DIMENSIONAL METRIC GRID & HUD OVERLAY              */}
-            {/* ========================================================================= */}
-            <svg 
+            {/* Virtual Bubble Level Indicator Overlay */}
+            {orientation.isSupported && isStreaming && (
+              <div className="absolute top-3 left-3 z-30 flex items-center gap-2 rounded-xl bg-slate-950/85 backdrop-blur-md px-3 py-1.5 border border-slate-800 text-xs shadow-lg">
+                <Compass
+                  className={`w-3.5 h-3.5 ${orientation.isLevel ? 'text-emerald-400' : 'text-slate-400'}`}
+                />
+                <span className="text-[11px] font-mono text-slate-300">
+                  {orientation.isLevel ? (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      POZIOM {orientation.roll !== null ? `${Math.abs(orientation.roll).toFixed(1)}°` : ''}
+                    </span>
+                  ) : (
+                    <span>Poziom: {orientation.roll !== null ? `${orientation.roll.toFixed(1)}°` : '--'}</span>
+                  )}
+                </span>
+                {/* Bubble Bar */}
+                <div className="w-14 h-2 bg-slate-800 rounded-full relative overflow-hidden flex items-center justify-center border border-slate-700">
+                  <div className="w-0.5 h-full bg-slate-500 absolute" />
+                  <div
+                    className={`w-2 h-2 rounded-full absolute transition-all duration-75 ${
+                      orientation.isLevel ? 'bg-emerald-400 scale-125' : 'bg-teal-400'
+                    }`}
+                    style={{
+                      left: `calc(50% + ${Math.max(-22, Math.min(22, (orientation.roll || 0) * 3))}px - 4px)`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Freeze Badge */}
+            {isFrozen && (
+              <div className="absolute top-3 right-3 z-30 flex items-center gap-1.5 rounded-xl bg-sky-950/90 border border-sky-400/50 px-3 py-1.5 text-xs text-sky-200 backdrop-blur-md shadow-lg font-semibold">
+                <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                <span>Kadr zamrożony (Tryb precyzyjny)</span>
+              </div>
+            )}
+
+            {/* Magnifier Loupe (3x Zoom above dragged point) */}
+            <MagnifierLoupe
+              sourceElement={isFrozen ? frozenCanvasRef.current : videoRef.current}
+              point={activeLoupePoint}
+              containerRect={containerRect}
+              zoom={3}
+              size={130}
+              label={activeLoupeLabel}
+              visible={Boolean(activeLoupePoint)}
+            />
+
+            {/* SVG ACCURATE METRIC GRID & HUD OVERLAY */}
+            <svg
               className="absolute inset-0 w-full h-full pointer-events-none"
               viewBox="0 0 100 100"
               preserveAspectRatio="none"
@@ -544,7 +792,6 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               {/* Multi-point Polygon Floor/Wall Outline Mode */}
               {scannerToolMode === 'polygon_trace' && polygonPoints.length >= 3 && (
                 <g>
-                  {/* Semi-transparent Polygon Interior Fill */}
                   <polygon
                     points={polygonPoints.map((p) => `${p.x},${p.y}`).join(' ')}
                     fill="rgba(45, 212, 191, 0.16)"
@@ -592,7 +839,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 </g>
               )}
 
-              {/* Laser Measurement Line between Point A and Point B (Laser 2pt mode) */}
+              {/* Laser Measurement Line between Point A and Point B */}
               {scannerToolMode === 'laser_2pt' && pointA && pointB && (
                 <g>
                   <line
@@ -655,9 +902,11 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 {pointA && (
                   <div
                     style={{ left: `${pointA.x}%`, top: `${pointA.y}%` }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group"
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group ${
+                      selectedPoint === 'A' ? 'ring-2 ring-teal-400 ring-offset-2 ring-offset-slate-950 rounded-full' : ''
+                    }`}
                   >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-500/30 border-2 border-teal-300 text-teal-200 text-xs font-bold shadow-lg shadow-teal-500/50 hover:scale-110 transition-transform">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-500/40 border-2 border-teal-300 text-teal-100 text-xs font-bold shadow-lg shadow-teal-500/50 hover:scale-110 transition-transform">
                       A
                     </div>
                     <span className="mt-1 rounded bg-slate-950/90 px-1.5 py-0.5 text-[9px] font-mono text-teal-300 border border-teal-500/30 whitespace-nowrap">
@@ -669,9 +918,11 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 {pointB && (
                   <div
                     style={{ left: `${pointB.x}%`, top: `${pointB.y}%` }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group"
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group ${
+                      selectedPoint === 'B' ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-950 rounded-full' : ''
+                    }`}
                   >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/30 border-2 border-amber-300 text-amber-200 text-xs font-bold shadow-lg shadow-amber-500/50 hover:scale-110 transition-transform">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/40 border-2 border-amber-300 text-amber-100 text-xs font-bold shadow-lg shadow-amber-500/50 hover:scale-110 transition-transform">
                       B
                     </div>
                     <span className="mt-1 rounded bg-slate-950/90 px-1.5 py-0.5 text-[9px] font-mono text-amber-300 border border-amber-500/30 whitespace-nowrap">
@@ -688,16 +939,73 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 <div
                   key={pt.id}
                   style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group"
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing flex flex-col items-center z-20 group ${
+                    selectedPoint === idx ? 'ring-2 ring-teal-400 ring-offset-2 ring-offset-slate-950 rounded-full' : ''
+                  }`}
                 >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-600/80 border-2 border-teal-300 text-white text-[11px] font-bold shadow-lg hover:scale-120 transition-transform">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-600/90 border-2 border-teal-300 text-white text-xs font-bold shadow-lg hover:scale-120 transition-transform">
                     {idx + 1}
                   </div>
                 </div>
               ))}
 
+            {/* Sub-pixel Nudge D-pad (Mikro-kroki do precyzyjnego celowania) */}
+            <div className="absolute right-3 bottom-14 z-30 flex flex-col items-center bg-slate-950/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 shadow-xl pointer-events-auto">
+              <span className="text-[9px] font-mono text-slate-400 mb-0.5">
+                D-Pad: <strong className="text-teal-300">{scannerToolMode === 'laser_2pt' ? `Pkt ${selectedPoint}` : `Pkt ${(typeof selectedPoint === 'number' ? selectedPoint + 1 : 1)}`}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleNudgePoint(0, -0.3)}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                title="Mikro-krok w górę"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleNudgePoint(-0.3, 0)}
+                  className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                  title="Mikro-krok w lewo"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                {scannerToolMode === 'laser_2pt' ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPoint(selectedPoint === 'B' ? 'A' : 'B')}
+                    className="px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 text-[10px] font-bold font-mono border border-teal-500/40 cursor-pointer"
+                    title="Zmień punkt A/B"
+                  >
+                    {selectedPoint === 'B' ? 'B' : 'A'}
+                  </button>
+                ) : (
+                  <span className="text-[10px] font-mono text-teal-400 font-bold px-1">
+                    #{(typeof selectedPoint === 'number' ? selectedPoint + 1 : 1)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleNudgePoint(0.3, 0)}
+                  className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                  title="Mikro-krok w prawo"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleNudgePoint(0, 0.3)}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                title="Mikro-krok w dół"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             {/* Bottom HUD Bar */}
-            <div className="absolute bottom-3 inset-x-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-950/85 backdrop-blur-md px-3.5 py-2 text-xs border border-slate-800 text-slate-300 z-10">
+            <div className="absolute bottom-3 inset-x-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-950/90 backdrop-blur-md px-3.5 py-2 text-xs border border-slate-800 text-slate-300 z-20">
               <div className="flex items-center gap-3">
                 {scannerToolMode === 'laser_2pt' ? (
                   <span className="flex items-center gap-1 font-mono text-teal-400 font-semibold">
@@ -716,12 +1024,12 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                   </div>
                 )}
               </div>
-              
+
               <div className="flex items-center gap-2">
                 <button
                   id="apply-measurement-to-room-btn"
                   onClick={handleApplyToRoom}
-                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1 text-xs font-bold text-white hover:bg-teal-500 transition shadow-sm"
+                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1 text-xs font-bold text-white hover:bg-teal-500 transition shadow-sm cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>
@@ -734,47 +1042,64 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             </div>
           </div>
 
-          {/* Quick Guidance Info */}
+          {/* Quick Guidance Info & Undo Controls */}
           <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/60 border border-slate-800 p-3 text-xs text-slate-400">
             <div className="flex items-center gap-2">
               <Info className="w-4 h-4 text-teal-400 shrink-0" />
               <span>
                 {scannerToolMode === 'laser_2pt' ? (
-                  <>Przeciągaj punkty <strong>A</strong> i <strong>B</strong>, aby zmierzyć odcinek na obrazie.</>
+                  <>
+                    Przeciągaj punkty <strong>A</strong> i <strong>B</strong> – lupa 3× ułatwia trafienie w narożnik. Użyj D-Pada do mikro-kroków.
+                  </>
                 ) : (
-                  <>Klikaj po obrazie, aby dodać wierzchołki wielokąta. Przeciągaj punkty, by dopasować kontur posadzki.</>
+                  <>
+                    Klikaj po obrazie, aby dodać wierzchołki wielokąta. Przeciągaj punkty, by dopasować kontur posadzki.
+                  </>
                 )}
               </span>
             </div>
 
-            {scannerToolMode === 'polygon_trace' && (
-              <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              {scannerToolMode === 'laser_2pt' && (
                 <button
-                  onClick={handleUndoPolygonPoint}
-                  disabled={polygonPoints.length <= 3}
-                  className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[11px] text-slate-300 disabled:opacity-40 transition"
-                  title="Cofnij ostatni punkt"
+                  onClick={handleUndoLaser}
+                  disabled={laserHistory.length === 0}
+                  className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-[11px] text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  title="Cofnij ostatnie przesunięcie punktu"
                 >
                   <Undo2 className="w-3 h-3" />
                   <span>Cofnij</span>
                 </button>
-                <button
-                  onClick={handleClearPolygon}
-                  className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[11px] text-slate-300 transition"
-                  title="Zresetuj wielokąt do prostokąta"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Reset</span>
-                </button>
-              </div>
-            )}
+              )}
+
+              {scannerToolMode === 'polygon_trace' && (
+                <>
+                  <button
+                    onClick={handleUndoPolygonPoint}
+                    disabled={polygonPoints.length <= 3}
+                    className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[11px] text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                    title="Cofnij ostatni punkt"
+                  >
+                    <Undo2 className="w-3 h-3" />
+                    <span>Cofnij</span>
+                  </button>
+                  <button
+                    onClick={handleClearPolygon}
+                    className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[11px] text-slate-300 transition cursor-pointer"
+                    title="Zresetuj wielokąt do prostokąta"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Reset</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right: Calibration Panel */}
         <div className="lg:col-span-4 space-y-4">
-
-          {/* Measurement Mode Selector (Only when in 2-point laser mode) */}
+          {/* Measurement Mode Selector */}
           {scannerToolMode === 'laser_2pt' && (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
@@ -784,7 +1109,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={() => handleSetMeasurementMode('wall_width')}
-                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border ${
+                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border cursor-pointer ${
                     activeMeasureMode === 'wall_width'
                       ? 'border-teal-500 bg-teal-950/50 text-teal-300'
                       : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
@@ -796,7 +1121,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
                 <button
                   onClick={() => handleSetMeasurementMode('wall_height')}
-                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border ${
+                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border cursor-pointer ${
                     activeMeasureMode === 'wall_height'
                       ? 'border-teal-500 bg-teal-950/50 text-teal-300'
                       : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
@@ -808,7 +1133,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
                 <button
                   onClick={() => handleSetMeasurementMode('free_measure')}
-                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border ${
+                  className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs font-semibold transition border cursor-pointer ${
                     activeMeasureMode === 'free_measure'
                       ? 'border-teal-500 bg-teal-950/50 text-teal-300'
                       : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
@@ -827,7 +1152,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               <Sliders className="w-4 h-4" />
               Kalibracja Optyczna
             </h4>
-            
+
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-300 font-medium">Szacowany dystans do ściany:</span>
@@ -852,17 +1177,20 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             <div className="rounded-xl bg-slate-950 p-3 text-[11px] text-slate-400 space-y-1">
               <div className="text-slate-300 font-semibold">Aktualne wymiary pomieszczenia:</div>
               <div className="flex justify-between font-mono text-slate-400">
-                <span>Szerokość: <strong className="text-slate-200">{roomWidth.toFixed(2)} m</strong></span>
-                <span>Długość: <strong className="text-slate-200">{roomLength.toFixed(2)} m</strong></span>
-                <span>Wysokość: <strong className="text-slate-200">{roomHeight.toFixed(2)} m</strong></span>
+                <span>
+                  Szerokość: <strong className="text-slate-200">{roomWidth.toFixed(2)} m</strong>
+                </span>
+                <span>
+                  Długość: <strong className="text-slate-200">{roomLength.toFixed(2)} m</strong>
+                </span>
+                <span>
+                  Wysokość: <strong className="text-slate-200">{roomHeight.toFixed(2)} m</strong>
+                </span>
               </div>
             </div>
           </div>
-
         </div>
-
       </div>
-
     </div>
   );
 };
