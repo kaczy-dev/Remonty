@@ -362,6 +362,15 @@ export default function HomePage() {
         console.warn('Failed to delete work log photo blob', err)
       );
     }
+    if (target?.photoIds && target.photoIds.length > 0) {
+      target.photoIds.forEach((pid) => {
+        if (pid !== target.photoId) {
+          deletePhotoBlob(pid).catch((err) =>
+            console.warn('Failed to delete work log gallery photo blob', err)
+          );
+        }
+      });
+    }
     updateProject({
       ...project,
       workLogs: (project.workLogs || []).filter((l) => l.id !== logId),

@@ -220,7 +220,8 @@ export interface WorkLogEntry {
   description: string;
   roomId?: string;
   stageCategory?: StageCategory;
-  photoId?: string; // photo stored in IndexedDB
+  photoId?: string; // photo stored in IndexedDB (primary / legacy single photo)
+  photoIds?: string[]; // multiple photos stored in IndexedDB (gallery)
   author?: string;
   createdAt: string;
 }
