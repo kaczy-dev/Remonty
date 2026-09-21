@@ -62,7 +62,7 @@ export const ReceiptViewerModal: React.FC<ReceiptViewerModalProps> = ({
     if (!photoSrc) return;
     const link = document.createElement('a');
     link.href = photoSrc;
-    link.download = `paragon-${expense.id.slice(0, 8)}-${expense.date}.jpg`;
+    link.download = `paragon-${expense.id.slice(0, 8)}-${expense.date}.webp`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
