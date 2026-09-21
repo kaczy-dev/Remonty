@@ -1,11 +1,16 @@
 export type RoomType = 'salon' | 'kuchnia' | 'lazienka' | 'sypialnia' | 'przedpokoj' | 'balkon';
 
+export type WallPosition = 'left' | 'right' | 'back' | 'front';
+
 export interface RoomOpening {
   id: string;
   type: 'window' | 'door';
   name: string;
   width: number; // in meters
   height: number;
+  wall?: WallPosition;
+  sillHeight?: number; // in meters from floor
+  offsetMeters?: number; // center position along wall in meters
 }
 
 export interface RoomFurniture {
@@ -100,6 +105,7 @@ export interface Room {
   notes: string;
   workStages?: RoomWorkStage[];
   isCompleted?: boolean;
+  polygonVertices?: { x: number; y: number }[];
 }
 
 export type StageCategory = 

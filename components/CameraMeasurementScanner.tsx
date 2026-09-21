@@ -32,7 +32,12 @@ interface CameraMeasurementScannerProps {
   roomWidth: number;
   roomLength: number;
   roomHeight: number;
-  onApplyMeasuredDimensions?: (width: number, length: number, height: number) => void;
+  onApplyMeasuredDimensions?: (
+    width: number,
+    length: number,
+    height: number,
+    polygonVertices?: { x: number; y: number }[]
+  ) => void;
   className?: string;
 }
 
@@ -227,10 +232,9 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       // Check torch capability
       const track = stream.getVideoTracks()[0];
       if (track) {
-        // @ts-expect-error torch capability check
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
-        // @ts-expect-error torch capability check
-        setIsTorchSupported(Boolean(caps.torch));
+        const trackWithCaps = track as unknown as { getCapabilities?: () => { torch?: boolean } };
+        const caps = typeof trackWithCaps.getCapabilities === 'function' ? trackWithCaps.getCapabilities() : {};
+        setIsTorchSupported(Boolean(caps?.torch));
       }
 
       if (videoRef.current) {
@@ -297,8 +301,8 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     if (!track) return;
     try {
       const nextState = !isTorchOn;
-      // @ts-expect-error advanced torch constraint in modern browsers
-      await track.applyConstraints({ advanced: [{ torch: nextState }] });
+      const trackWithTorch = track as unknown as { applyConstraints: (c: unknown) => Promise<void> };
+      await trackWithTorch.applyConstraints({ advanced: [{ torch: nextState }] });
       setIsTorchOn(nextState);
     } catch (err) {
       console.warn('Torch toggle failed', err);
@@ -447,10 +451,23 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     const rawY = Math.max(2, Math.min(98, ((e.clientY - rect.top) / rect.height) * 100));
 
     if (scannerToolMode === 'polygon_trace' && activeDraggingPolyIdx !== null) {
+      let finalX = rawX;
+      let finalY = rawY;
+      const prevIdx = (activeDraggingPolyIdx - 1 + polygonPoints.length) % polygonPoints.length;
+      const nextIdx = (activeDraggingPolyIdx + 1) % polygonPoints.length;
+      const prevP = polygonPoints[prevIdx];
+      const nextP = polygonPoints[nextIdx];
+
+      // Magnetic snap to horizontal or vertical alignment with neighbors (threshold: 2.2%)
+      if (prevP && Math.abs(rawX - prevP.x) < 2.2) finalX = prevP.x;
+      if (prevP && Math.abs(rawY - prevP.y) < 2.2) finalY = prevP.y;
+      if (nextP && Math.abs(rawX - nextP.x) < 2.2) finalX = nextP.x;
+      if (nextP && Math.abs(rawY - nextP.y) < 2.2) finalY = nextP.y;
+
       setPolygonPoints((prev) =>
         prev.map((p, i) =>
           i === activeDraggingPolyIdx
-            ? { ...p, x: Math.round(rawX * 10) / 10, y: Math.round(rawY * 10) / 10 }
+            ? { ...p, x: Math.round(finalX * 10) / 10, y: Math.round(finalY * 10) / 10 }
             : p
         )
       );
@@ -490,9 +507,25 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const handleApplyToRoom = () => {
     if (!onApplyMeasuredDimensions) return;
     if (scannerToolMode === 'polygon_trace') {
-      const side = Math.sqrt(Math.max(1, polygonMetrics.areaM2));
-      const roundedSide = Math.round(side * 100) / 100;
-      onApplyMeasuredDimensions(roundedSide, roundedSide, roomHeight);
+      if (polygonPoints.length < 3) return;
+      const metricVertices = polygonPoints.map((p) => ({
+        x: (p.x / 100) * visibleFrameWidthMeters,
+        y: (p.y / 100) * visibleFrameHeightMeters,
+      }));
+      const minX = Math.min(...metricVertices.map((v) => v.x));
+      const minY = Math.min(...metricVertices.map((v) => v.y));
+      const maxX = Math.max(...metricVertices.map((v) => v.x));
+      const maxY = Math.max(...metricVertices.map((v) => v.y));
+
+      const boundingW = Math.max(0.5, Math.round((maxX - minX) * 100) / 100);
+      const boundingL = Math.max(0.5, Math.round((maxY - minY) * 100) / 100);
+
+      const normalizedPoly = metricVertices.map((v) => ({
+        x: Math.round((v.x - minX) * 100) / 100,
+        y: Math.round((v.y - minY) * 100) / 100,
+      }));
+
+      onApplyMeasuredDimensions(boundingW, boundingL, roomHeight, normalizedPoly);
       return;
     }
 

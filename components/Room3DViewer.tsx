@@ -1199,14 +1199,38 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       floorTexture = createWoodTexture('plank', floorColor);
     }
 
-    const floorGeo = new THREE.BoxGeometry(W, 0.08, L);
     const floorMat = new THREE.MeshStandardMaterial({
       map: floorTexture,
       roughness: floorRoughness,
       metalness: floorRoughness < 0.2 ? 0.15 : 0.04,
     });
-    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-    floorMesh.position.set(0, -0.04, 0);
+
+    let floorMesh: THREE.Mesh;
+    if (room.polygonVertices && room.polygonVertices.length >= 3) {
+      const shape = new THREE.Shape();
+      const poly = room.polygonVertices;
+      const polyCenterX = W / 2;
+      const polyCenterZ = L / 2;
+      poly.forEach((pt, idx) => {
+        const px = pt.x - polyCenterX;
+        const pz = pt.y - polyCenterZ;
+        if (idx === 0) shape.moveTo(px, pz);
+        else shape.lineTo(px, pz);
+      });
+      shape.closePath();
+
+      const polyFloorGeo = new THREE.ExtrudeGeometry(shape, {
+        depth: 0.08,
+        bevelEnabled: false,
+      });
+      polyFloorGeo.rotateX(Math.PI / 2);
+      floorMesh = new THREE.Mesh(polyFloorGeo, floorMat);
+      floorMesh.position.set(0, 0, 0);
+    } else {
+      const floorGeo = new THREE.BoxGeometry(W, 0.08, L);
+      floorMesh = new THREE.Mesh(floorGeo, floorMat);
+      floorMesh.position.set(0, -0.04, 0);
+    }
     floorMesh.receiveShadow = true;
     floorMesh.name = 'room-floor-mesh';
     if (overlayFloorMode === 'furniture_shadows_only' && photoDisplayMode === 'photo_overlay') {
@@ -1308,51 +1332,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       }
     }
 
-    const backWallGeo = new THREE.BoxGeometry(W + wallThick * 2, H, wallThick);
-    const backWall = new THREE.Mesh(backWallGeo, backWallMat);
-    backWall.position.set(0, H / 2, -halfL - wallThick / 2);
-    backWall.receiveShadow = true;
-    backWall.castShadow = true;
-    roomGroup.add(backWall);
-
-    // Left Wall with Window Cutout
-    // We create left wall with a clean architectural window opening
-    const windowW = Math.min(1.6, L * 0.45);
-    const windowH = Math.min(1.4, H * 0.55);
-    const windowBottom = 0.85;
-
-    // Solid wall section before window
-    const lwL1 = (L - windowW) / 2;
-    const leftWallPart1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, lwL1), wallMat);
-    leftWallPart1.position.set(-halfW - wallThick / 2, H / 2, -halfL + lwL1 / 2);
-    leftWallPart1.receiveShadow = true;
-    leftWallPart1.castShadow = true;
-    roomGroup.add(leftWallPart1);
-
-    const leftWallPart2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, lwL1), wallMat);
-    leftWallPart2.position.set(-halfW - wallThick / 2, H / 2, halfL - lwL1 / 2);
-    leftWallPart2.receiveShadow = true;
-    leftWallPart2.castShadow = true;
-    roomGroup.add(leftWallPart2);
-
-    // Below window (parapet wall)
-    const leftWallBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, windowBottom, windowW), wallMat);
-    leftWallBelow.position.set(-halfW - wallThick / 2, windowBottom / 2, 0);
-    leftWallBelow.receiveShadow = true;
-    leftWallBelow.castShadow = true;
-    roomGroup.add(leftWallBelow);
-
-    // Above window (nadproże)
-    const topH = H - (windowBottom + windowH);
-    if (topH > 0) {
-      const leftWallAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, windowW), wallMat);
-      leftWallAbove.position.set(-halfW - wallThick / 2, H - topH / 2, 0);
-      leftWallAbove.receiveShadow = true;
-      leftWallAbove.castShadow = true;
-      roomGroup.add(leftWallAbove);
-    }
-
-    // Window Frame & Glass
+    // Materials for openings
     const frameMat = new THREE.MeshStandardMaterial({
       color: '#1e293b',
       roughness: 0.3,
@@ -1367,84 +1347,293 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       transmission: 0.85,
       ior: 1.5,
     });
-
-    // Glass pane
-    const glassMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.02, windowH - 0.08, windowW - 0.08),
-      glassMat
-    );
-    glassMesh.position.set(-halfW - wallThick / 2, windowBottom + windowH / 2, 0);
-    roomGroup.add(glassMesh);
-
-    // Window mullions (ramy i szprosy)
-    const windowFrameOuter = new THREE.Mesh(
-      new THREE.BoxGeometry(wallThick + 0.04, 0.05, windowW),
-      frameMat
-    );
-    windowFrameOuter.position.set(-halfW - wallThick / 2, windowBottom, 0);
-    roomGroup.add(windowFrameOuter);
-
-    // Windowsill (parapet dębowy)
-    const parapetGeo = new THREE.BoxGeometry(wallThick + 0.1, 0.035, windowW + 0.12);
     const parapetMat = new THREE.MeshStandardMaterial({
       color: '#d4a373',
       roughness: 0.35,
     });
-    const parapet = new THREE.Mesh(parapetGeo, parapetMat);
-    parapet.position.set(-halfW - wallThick / 2 + 0.04, windowBottom, 0);
-    parapet.castShadow = true;
-    roomGroup.add(parapet);
-
-    // Right Wall with Door
-    const doorW = 0.9;
-    const doorH = 2.1;
-    const rwL1 = (L - doorW) / 2;
-
-    const rightWallPart1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, rwL1), wallMat);
-    rightWallPart1.position.set(halfW + wallThick / 2, H / 2, -halfL + rwL1 / 2);
-    rightWallPart1.receiveShadow = true;
-    rightWallPart1.castShadow = true;
-    roomGroup.add(rightWallPart1);
-
-    const rightWallPart2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, rwL1), wallMat);
-    rightWallPart2.position.set(halfW + wallThick / 2, H / 2, halfL - rwL1 / 2);
-    rightWallPart2.receiveShadow = true;
-    rightWallPart2.castShadow = true;
-    roomGroup.add(rightWallPart2);
-
-    const rightWallAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H - doorH, doorW), wallMat);
-    rightWallAbove.position.set(halfW + wallThick / 2, doorH + (H - doorH) / 2, 0);
-    rightWallAbove.receiveShadow = true;
-    rightWallAbove.castShadow = true;
-    roomGroup.add(rightWallAbove);
-
-    // Door leaf & handle
     const doorMat = new THREE.MeshStandardMaterial({
       color: '#f1f5f9',
       roughness: 0.4,
     });
-    const doorLeaf = new THREE.Mesh(new THREE.BoxGeometry(0.04, doorH - 0.02, doorW - 0.04), doorMat);
-    doorLeaf.position.set(halfW + wallThick / 2, doorH / 2, 0);
-    doorLeaf.castShadow = true;
-    roomGroup.add(doorLeaf);
-
-    // Door handle (Klamka chrom)
     const handleMat = new THREE.MeshStandardMaterial({
       color: '#94a3b8',
       metalness: 0.95,
       roughness: 0.15,
     });
-    const handleMesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
-    handleMesh.position.set(halfW + wallThick / 2 - 0.03, 1.05, doorW * 0.35);
-    roomGroup.add(handleMesh);
 
-    // Front Wall (Sectioned or semi-transparent in cutaway)
+    // Map room openings to target walls intelligently
+    const openingsByWall: { [key in 'back' | 'left' | 'right' | 'front']?: typeof room.openings[0] } = {};
+    let windowCounter = 0;
+    let doorCounter = 0;
+
+    (room.openings || []).forEach((op) => {
+      let targetWall: 'back' | 'left' | 'right' | 'front' = (op.wall as 'back' | 'left' | 'right' | 'front') || 'left';
+      if (!op.wall) {
+        if (op.type === 'window') {
+          targetWall = windowCounter === 0 ? 'left' : windowCounter === 1 ? 'back' : 'right';
+          windowCounter++;
+        } else {
+          targetWall = doorCounter === 0 ? 'right' : doorCounter === 1 ? 'front' : 'left';
+          doorCounter++;
+        }
+      }
+      if (!openingsByWall[targetWall]) {
+        openingsByWall[targetWall] = op;
+      }
+    });
+
+    // 1. Back Wall (along X axis at Z = -halfL - wallThick / 2, width = W + wallThick * 2)
+    const backOp = openingsByWall['back'];
+    const totalBackW = W + wallThick * 2;
+    if (!backOp) {
+      const backWallGeo = new THREE.BoxGeometry(totalBackW, H, wallThick);
+      const backWall = new THREE.Mesh(backWallGeo, backWallMat);
+      backWall.position.set(0, H / 2, -halfL - wallThick / 2);
+      backWall.receiveShadow = true;
+      backWall.castShadow = true;
+      roomGroup.add(backWall);
+    } else {
+      const opW = Math.min(backOp.width || 1.4, totalBackW * 0.7);
+      const opH = Math.min(backOp.height || 1.4, H * 0.85);
+      const isWin = backOp.type === 'window';
+      const sillH = isWin ? (backOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+      const topH = Math.max(0, H - (sillH + opH));
+      const sideW = (totalBackW - opW) / 2;
+
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), backWallMat);
+      p1.position.set(-totalBackW / 2 + sideW / 2, H / 2, -halfL - wallThick / 2);
+      p1.receiveShadow = true;
+      p1.castShadow = true;
+      roomGroup.add(p1);
+
+      const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), backWallMat);
+      p2.position.set(totalBackW / 2 - sideW / 2, H / 2, -halfL - wallThick / 2);
+      p2.receiveShadow = true;
+      p2.castShadow = true;
+      roomGroup.add(p2);
+
+      if (sillH > 0.05) {
+        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), backWallMat);
+        pBelow.position.set(0, sillH / 2, -halfL - wallThick / 2);
+        pBelow.receiveShadow = true;
+        pBelow.castShadow = true;
+        roomGroup.add(pBelow);
+      }
+      if (topH > 0.05) {
+        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), backWallMat);
+        pAbove.position.set(0, H - topH / 2, -halfL - wallThick / 2);
+        pAbove.receiveShadow = true;
+        pAbove.castShadow = true;
+        roomGroup.add(pAbove);
+      }
+
+      if (isWin) {
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.08, opH - 0.08, 0.02), glassMat);
+        glass.position.set(0, sillH + opH / 2, -halfL - wallThick / 2);
+        roomGroup.add(glass);
+
+        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(opW, 0.05, wallThick + 0.04), frameMat);
+        wFrame.position.set(0, sillH, -halfL - wallThick / 2);
+        roomGroup.add(wFrame);
+
+        if (sillH > 0.05) {
+          const parapet = new THREE.Mesh(new THREE.BoxGeometry(opW + 0.12, 0.035, wallThick + 0.1), parapetMat);
+          parapet.position.set(0, sillH, -halfL - wallThick / 2 + 0.04);
+          parapet.castShadow = true;
+          roomGroup.add(parapet);
+        }
+      } else {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.04, opH - 0.02, 0.04), doorMat);
+        door.position.set(0, opH / 2, -halfL - wallThick / 2);
+        door.castShadow = true;
+        roomGroup.add(door);
+
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.06), handleMat);
+        handle.position.set(opW * 0.35, 1.05, -halfL - wallThick / 2 + 0.03);
+        roomGroup.add(handle);
+      }
+    }
+
+    // 2. Left Wall (along Z axis at X = -halfW - wallThick / 2, length = L)
+    const leftOp = openingsByWall['left'];
+    if (!leftOp) {
+      const leftWallGeo = new THREE.BoxGeometry(wallThick, H, L);
+      const leftWall = new THREE.Mesh(leftWallGeo, wallMat);
+      leftWall.position.set(-halfW - wallThick / 2, H / 2, 0);
+      leftWall.receiveShadow = true;
+      leftWall.castShadow = true;
+      roomGroup.add(leftWall);
+    } else {
+      const opW = Math.min(leftOp.width || 1.4, L * 0.7);
+      const opH = Math.min(leftOp.height || 1.4, H * 0.85);
+      const isWin = leftOp.type === 'window';
+      const sillH = isWin ? (leftOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+      const topH = Math.max(0, H - (sillH + opH));
+      const sideL = (L - opW) / 2;
+
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
+      p1.position.set(-halfW - wallThick / 2, H / 2, -halfL + sideL / 2);
+      p1.receiveShadow = true;
+      p1.castShadow = true;
+      roomGroup.add(p1);
+
+      const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
+      p2.position.set(-halfW - wallThick / 2, H / 2, halfL - sideL / 2);
+      p2.receiveShadow = true;
+      p2.castShadow = true;
+      roomGroup.add(p2);
+
+      if (sillH > 0.05) {
+        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
+        pBelow.position.set(-halfW - wallThick / 2, sillH / 2, 0);
+        pBelow.receiveShadow = true;
+        pBelow.castShadow = true;
+        roomGroup.add(pBelow);
+      }
+      if (topH > 0.05) {
+        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
+        pAbove.position.set(-halfW - wallThick / 2, H - topH / 2, 0);
+        pAbove.receiveShadow = true;
+        pAbove.castShadow = true;
+        roomGroup.add(pAbove);
+      }
+
+      if (isWin) {
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
+        glass.position.set(-halfW - wallThick / 2, sillH + opH / 2, 0);
+        roomGroup.add(glass);
+
+        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
+        wFrame.position.set(-halfW - wallThick / 2, sillH, 0);
+        roomGroup.add(wFrame);
+
+        if (sillH > 0.05) {
+          const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
+          parapet.position.set(-halfW - wallThick / 2 + 0.04, sillH, 0);
+          parapet.castShadow = true;
+          roomGroup.add(parapet);
+        }
+      } else {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
+        door.position.set(-halfW - wallThick / 2, opH / 2, 0);
+        door.castShadow = true;
+        roomGroup.add(door);
+
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
+        handle.position.set(-halfW - wallThick / 2 + 0.03, 1.05, opW * 0.35);
+        roomGroup.add(handle);
+      }
+    }
+
+    // 3. Right Wall (along Z axis at X = halfW + wallThick / 2, length = L)
+    const rightOp = openingsByWall['right'];
+    if (!rightOp) {
+      const rightWallGeo = new THREE.BoxGeometry(wallThick, H, L);
+      const rightWall = new THREE.Mesh(rightWallGeo, wallMat);
+      rightWall.position.set(halfW + wallThick / 2, H / 2, 0);
+      rightWall.receiveShadow = true;
+      rightWall.castShadow = true;
+      roomGroup.add(rightWall);
+    } else {
+      const opW = Math.min(rightOp.width || 0.9, L * 0.7);
+      const opH = Math.min(rightOp.height || 2.1, H * 0.9);
+      const isWin = rightOp.type === 'window';
+      const sillH = isWin ? (rightOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+      const topH = Math.max(0, H - (sillH + opH));
+      const sideL = (L - opW) / 2;
+
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
+      p1.position.set(halfW + wallThick / 2, H / 2, -halfL + sideL / 2);
+      p1.receiveShadow = true;
+      p1.castShadow = true;
+      roomGroup.add(p1);
+
+      const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
+      p2.position.set(halfW + wallThick / 2, H / 2, halfL - sideL / 2);
+      p2.receiveShadow = true;
+      p2.castShadow = true;
+      roomGroup.add(p2);
+
+      if (sillH > 0.05) {
+        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
+        pBelow.position.set(halfW + wallThick / 2, sillH / 2, 0);
+        pBelow.receiveShadow = true;
+        pBelow.castShadow = true;
+        roomGroup.add(pBelow);
+      }
+      if (topH > 0.05) {
+        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
+        pAbove.position.set(halfW + wallThick / 2, H - topH / 2, 0);
+        pAbove.receiveShadow = true;
+        pAbove.castShadow = true;
+        roomGroup.add(pAbove);
+      }
+
+      if (isWin) {
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
+        glass.position.set(halfW + wallThick / 2, sillH + opH / 2, 0);
+        roomGroup.add(glass);
+
+        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
+        wFrame.position.set(halfW + wallThick / 2, sillH, 0);
+        roomGroup.add(wFrame);
+
+        if (sillH > 0.05) {
+          const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
+          parapet.position.set(halfW + wallThick / 2 - 0.04, sillH, 0);
+          parapet.castShadow = true;
+          roomGroup.add(parapet);
+        }
+      } else {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
+        door.position.set(halfW + wallThick / 2, opH / 2, 0);
+        door.castShadow = true;
+        roomGroup.add(door);
+
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
+        handle.position.set(halfW + wallThick / 2 - 0.03, 1.05, opW * 0.35);
+        roomGroup.add(handle);
+      }
+    }
+
+    // 4. Front Wall (Sectioned or semi-transparent in cutaway)
     if (!cutawayWalls) {
-      const frontWallGeo = new THREE.BoxGeometry(W + wallThick * 2, H, wallThick);
-      const frontWall = new THREE.Mesh(frontWallGeo, wallMat);
-      frontWall.position.set(0, H / 2, halfL + wallThick / 2);
-      frontWall.receiveShadow = true;
-      roomGroup.add(frontWall);
+      const frontOp = openingsByWall['front'];
+      if (!frontOp) {
+        const frontWallGeo = new THREE.BoxGeometry(W + wallThick * 2, H, wallThick);
+        const frontWall = new THREE.Mesh(frontWallGeo, wallMat);
+        frontWall.position.set(0, H / 2, halfL + wallThick / 2);
+        frontWall.receiveShadow = true;
+        roomGroup.add(frontWall);
+      } else {
+        const opW = Math.min(frontOp.width || 1.4, totalBackW * 0.7);
+        const opH = Math.min(frontOp.height || 1.4, H * 0.85);
+        const isWin = frontOp.type === 'window';
+        const sillH = isWin ? (frontOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+        const topH = Math.max(0, H - (sillH + opH));
+        const sideW = (totalBackW - opW) / 2;
+
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), wallMat);
+        p1.position.set(-totalBackW / 2 + sideW / 2, H / 2, halfL + wallThick / 2);
+        p1.receiveShadow = true;
+        roomGroup.add(p1);
+
+        const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), wallMat);
+        p2.position.set(totalBackW / 2 - sideW / 2, H / 2, halfL + wallThick / 2);
+        p2.receiveShadow = true;
+        roomGroup.add(p2);
+
+        if (sillH > 0.05) {
+          const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), wallMat);
+          pBelow.position.set(0, sillH / 2, halfL + wallThick / 2);
+          roomGroup.add(pBelow);
+        }
+        if (topH > 0.05) {
+          const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), wallMat);
+          pAbove.position.set(0, H - topH / 2, halfL + wallThick / 2);
+          roomGroup.add(pAbove);
+        }
+      }
     } else {
       // Half-height cutaway wall indicator for architectural section
       const stubWallGeo = new THREE.BoxGeometry(W + wallThick * 2, 0.35, wallThick);

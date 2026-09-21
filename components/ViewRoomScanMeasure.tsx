@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Room, RoomFurniture, RoomOutlet } from '@/types/renovation';
+import { Room, RoomFurniture, RoomOutlet, RoomOpening, WallPosition } from '@/types/renovation';
 import {
   Camera,
   Ruler,
@@ -12,6 +12,9 @@ import {
   Box,
   X,
   Armchair,
+  DoorOpen,
+  Frame,
+  Trash2,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
@@ -19,7 +22,16 @@ import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
 
 interface ViewRoomScanMeasureProps {
   room: Room;
-  onUpdateRoomDimensions: (roomId: string, width: number, length: number, height: number) => void;
+  onUpdateRoomDimensions: (
+    roomId: string,
+    width: number,
+    length: number,
+    height: number,
+    polygonVertices?: { x: number; y: number }[]
+  ) => void;
+  onAddOpening?: (roomId: string, opening: RoomOpening) => void;
+  onUpdateOpening?: (roomId: string, opening: RoomOpening) => void;
+  onDeleteOpening?: (roomId: string, openingId: string) => void;
   onAddFurniture: (roomId: string, furniture: RoomFurniture) => void;
   onUpdateFurniture?: (roomId: string, furniture: RoomFurniture[]) => void;
   onDeleteFurniture?: (roomId: string, furnitureId: string) => void;
@@ -32,6 +44,9 @@ interface ViewRoomScanMeasureProps {
 export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   room,
   onUpdateRoomDimensions,
+  onAddOpening,
+  onUpdateOpening,
+  onDeleteOpening,
   onAddFurniture,
   onUpdateFurniture,
   onDeleteFurniture,
@@ -58,6 +73,16 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [newFurnType, setNewFurnType] = useState<string>('sofa');
   const [newFurnName, setNewFurnName] = useState<string>('Sofa 3-osobowa');
   const [newFurnColor, setNewFurnColor] = useState<string>('#384252');
+
+  // Openings Modal state
+  const [showOpeningModal, setShowOpeningModal] = useState<boolean>(false);
+  const [openingType, setOpeningType] = useState<'window' | 'door'>('window');
+  const [openingName, setOpeningName] = useState<string>('Okno dwuskrzydłowe');
+  const [openingWidth, setOpeningWidth] = useState<number>(1.2);
+  const [openingHeight, setOpeningHeight] = useState<number>(1.4);
+  const [openingWall, setOpeningWall] = useState<WallPosition>('left');
+  const [openingSillHeight, setOpeningSillHeight] = useState<number>(0.85);
+
   const persistedPhotoSrc = usePhotoSrc(room.photoUrl);
   const activePhoto = userPhotoUrl || persistedPhotoSrc;
 
@@ -66,11 +91,16 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [length, setLength] = useState(room.length);
   const [height, setHeight] = useState(room.height);
 
-  const handleApplyDimensions = (newW: number, newL: number, newH: number) => {
+  const handleApplyDimensions = (
+    newW: number,
+    newL: number,
+    newH: number,
+    newPoly?: { x: number; y: number }[]
+  ) => {
     setWidth(newW);
     setLength(newL);
     setHeight(newH);
-    onUpdateRoomDimensions(room.id, newW, newL, newH);
+    onUpdateRoomDimensions(room.id, newW, newL, newH, newPoly ?? room.polygonVertices);
   };
 
   // Reusable 2D Blueprint SVG Canvas
@@ -111,34 +141,170 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
           DŁUGOŚĆ: {room.length.toFixed(2)} m
         </text>
 
-        {/* Room Floor Rectangle */}
-        <rect 
-          x="60" 
-          y="60" 
-          width="380" 
-          height="280" 
-          fill={`url(#floorMatGrad-${compact ? 'c' : 'f'})`}
-          stroke="#475569" 
-          strokeWidth="8" 
-          rx="2"
-        />
-
-        {/* Door Opening and Swing Arc */}
-        <g transform="translate(340, 336)">
-          <rect x="0" y="0" width="60" height="8" fill="#020617" />
-          <line x1="0" y1="4" x2="0" y2="-55" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" />
-          <path d="M 0 -55 A 55 55 0 0 1 55 4" fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="4 3" />
-          <text x="-10" y="16" fill="#38bdf8" fontSize="9" fontWeight="medium">Drzwi 80cm</text>
-        </g>
-
-        {/* Window */}
-        {room.openings.some(o => o.type === 'window') && (
-          <g transform="translate(180, 56)">
-            <rect x="0" y="0" width="100" height="8" fill="#0284c7" fillOpacity="0.4" stroke="#38bdf8" strokeWidth="2" />
-            <line x1="0" y1="4" x2="100" y2="4" stroke="#ffffff" strokeWidth="1.5" />
-            <text x="50" y="-8" fill="#38bdf8" fontSize="9" textAnchor="middle">Okno HS</text>
+        {/* Room Floor (Rectangle or Custom Polygon) */}
+        {room.polygonVertices && room.polygonVertices.length >= 3 ? (
+          <g>
+            <polygon
+              points={room.polygonVertices
+                .map((v) => {
+                  const sx = 60 + (v.x / Math.max(0.1, room.width)) * 380;
+                  const sy = 60 + (v.y / Math.max(0.1, room.length)) * 280;
+                  return `${sx},${sy}`;
+                })
+                .join(' ')}
+              fill={`url(#floorMatGrad-${compact ? 'c' : 'f'})`}
+              stroke="#475569"
+              strokeWidth="8"
+              strokeLinejoin="round"
+            />
+            {room.polygonVertices.map((v, idx) => {
+              const sx = 60 + (v.x / Math.max(0.1, room.width)) * 380;
+              const sy = 60 + (v.y / Math.max(0.1, room.length)) * 280;
+              return (
+                <circle
+                  key={`v-${idx}`}
+                  cx={sx}
+                  cy={sy}
+                  r="4"
+                  fill="#10b981"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+              );
+            })}
           </g>
+        ) : (
+          <rect 
+            x="60" 
+            y="60" 
+            width="380" 
+            height="280" 
+            fill={`url(#floorMatGrad-${compact ? 'c' : 'f'})`}
+            stroke="#475569" 
+            strokeWidth="8" 
+            rx="2"
+          />
         )}
+
+        {/* Dynamic Architectural Openings (Windows and Doors) */}
+        {(room.openings || []).map((op, idx) => {
+          let wall = op.wall;
+          if (!wall) {
+            if (op.type === 'window') wall = idx === 0 ? 'left' : 'back';
+            else wall = idx === 0 ? 'right' : 'front';
+          }
+
+          if (wall === 'back') {
+            const opW = Math.max(28, Math.min(160, (op.width / room.width) * 380));
+            const opX = 60 + 190 - opW / 2;
+            const opY = 56;
+            return (
+              <g key={op.id}>
+                {op.type === 'window' ? (
+                  <>
+                    <rect x={opX} y={opY} width={opW} height={8} fill="#0284c7" fillOpacity="0.5" stroke="#38bdf8" strokeWidth="1.5" />
+                    <line x1={opX} y1={opY + 4} x2={opX + opW} y2={opY + 4} stroke="#ffffff" strokeWidth="1.5" />
+                    <text x={opX + opW / 2} y={opY - 6} fill="#38bdf8" fontSize="8.5" textAnchor="middle" fontWeight="bold">
+                      {op.name} ({op.width.toFixed(2)}m)
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    <rect x={opX} y={opY} width={opW} height={8} fill="#020617" />
+                    <line x1={opX} y1={opY + 4} x2={opX} y2={opY + 4 + opW * 0.8} stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+                    <path d={`M ${opX} ${opY + 4 + opW * 0.8} A ${opW * 0.8} ${opW * 0.8} 0 0 1 ${opX + opW * 0.8} ${opY + 4}`} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <text x={opX + opW / 2} y={opY - 6} fill="#38bdf8" fontSize="8.5" textAnchor="middle" fontWeight="bold">
+                      {op.name}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          }
+
+          if (wall === 'front') {
+            const opW = Math.max(28, Math.min(160, (op.width / room.width) * 380));
+            const opX = 60 + 190 - opW / 2;
+            const opY = 336;
+            return (
+              <g key={op.id}>
+                {op.type === 'window' ? (
+                  <>
+                    <rect x={opX} y={opY} width={opW} height={8} fill="#0284c7" fillOpacity="0.5" stroke="#38bdf8" strokeWidth="1.5" />
+                    <line x1={opX} y1={opY + 4} x2={opX + opW} y2={opY + 4} stroke="#ffffff" strokeWidth="1.5" />
+                    <text x={opX + opW / 2} y={opY + 18} fill="#38bdf8" fontSize="8.5" textAnchor="middle" fontWeight="bold">
+                      {op.name} ({op.width.toFixed(2)}m)
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    <rect x={opX} y={opY} width={opW} height={8} fill="#020617" />
+                    <line x1={opX} y1={opY + 4} x2={opX} y2={opY + 4 - opW * 0.8} stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+                    <path d={`M ${opX} ${opY + 4 - opW * 0.8} A ${opW * 0.8} ${opW * 0.8} 0 0 1 ${opX + opW * 0.8} ${opY + 4}`} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <text x={opX + opW / 2} y={opY + 18} fill="#38bdf8" fontSize="8.5" textAnchor="middle" fontWeight="bold">
+                      {op.name}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          }
+
+          if (wall === 'left') {
+            const opH = Math.max(28, Math.min(140, (op.width / room.length) * 280));
+            const opX = 56;
+            const opY = 60 + 140 - opH / 2;
+            return (
+              <g key={op.id}>
+                {op.type === 'window' ? (
+                  <>
+                    <rect x={opX} y={opY} width={8} height={opH} fill="#0284c7" fillOpacity="0.5" stroke="#38bdf8" strokeWidth="1.5" />
+                    <line x1={opX + 4} y1={opY} x2={opX + 4} y2={opY + opH} stroke="#ffffff" strokeWidth="1.5" />
+                    <text x={opX - 6} y={opY + opH / 2} fill="#38bdf8" fontSize="8.5" textAnchor="end" dominantBaseline="middle" fontWeight="bold">
+                      {op.name}
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    <rect x={opX} y={opY} width={8} height={opH} fill="#020617" />
+                    <line x1={opX + 4} y1={opY} x2={opX + 4 + opH * 0.8} y2={opY} stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+                    <path d={`M ${opX + 4 + opH * 0.8} ${opY} A ${opH * 0.8} ${opH * 0.8} 0 0 1 ${opX + 4} ${opY + opH * 0.8}`} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <text x={opX - 6} y={opY + opH / 2} fill="#38bdf8" fontSize="8.5" textAnchor="end" dominantBaseline="middle" fontWeight="bold">
+                      {op.name}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          }
+
+          // right wall
+          const opH = Math.max(28, Math.min(140, (op.width / room.length) * 280));
+          const opX = 436;
+          const opY = 60 + 140 - opH / 2;
+          return (
+            <g key={op.id}>
+              {op.type === 'window' ? (
+                <>
+                  <rect x={opX} y={opY} width={8} height={opH} fill="#0284c7" fillOpacity="0.5" stroke="#38bdf8" strokeWidth="1.5" />
+                  <line x1={opX + 4} y1={opY} x2={opX + 4} y2={opY + opH} stroke="#ffffff" strokeWidth="1.5" />
+                  <text x={opX + 12} y={opY + opH / 2} fill="#38bdf8" fontSize="8.5" textAnchor="start" dominantBaseline="middle" fontWeight="bold">
+                    {op.name}
+                  </text>
+                </>
+              ) : (
+                <>
+                  <rect x={opX} y={opY} width={8} height={opH} fill="#020617" />
+                  <line x1={opX + 4} y1={opY} x2={opX + 4 - opH * 0.8} y2={opY} stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+                  <path d={`M ${opX + 4 - opH * 0.8} ${opY} A ${opH * 0.8} ${opH * 0.8} 0 0 0 ${opX + 4} ${opY + opH * 0.8}`} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 3" />
+                  <text x={opX + 12} y={opY + opH / 2} fill="#38bdf8" fontSize="8.5" textAnchor="start" dominantBaseline="middle" fontWeight="bold">
+                    {op.name}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })}
 
         {/* Interactive Furniture Items */}
         {room.furniture.map((item) => {
@@ -536,6 +702,114 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               </div>
             </div>
 
+            {/* Openings Management Card (Drzwi i Okna) */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                    <DoorOpen className="w-4 h-4 text-teal-400" />
+                    Stolarka Otworowa (Okna i Drzwi)
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Otwory ścienne odejmowane od powierzchni tynków, gładzi i malowania.
+                  </p>
+                </div>
+                <span className="rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-mono text-teal-300">
+                  {room.openings?.length || 0} szt.
+                </span>
+              </div>
+
+              {/* List of Openings */}
+              <div className="space-y-2">
+                {(!room.openings || room.openings.length === 0) ? (
+                  <div className="rounded-xl border border-dashed border-slate-800 p-3 text-center text-xs text-slate-500">
+                    Brak zdefiniowanych otworów. Ściany są pełne.
+                  </div>
+                ) : (
+                  room.openings.map((op) => {
+                    const opArea = op.width * op.height;
+                    const wallLabels: Record<string, string> = {
+                      left: 'Ściana lewa',
+                      right: 'Ściana prawa',
+                      back: 'Ściana tylna (północ)',
+                      front: 'Ściana przednia (południe)',
+                    };
+                    return (
+                      <div
+                        key={op.id}
+                        className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={`p-1.5 rounded-lg ${op.type === 'window' ? 'bg-sky-500/10 text-sky-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                            {op.type === 'window' ? <Frame className="w-3.5 h-3.5" /> : <DoorOpen className="w-3.5 h-3.5" />}
+                          </div>
+                          <div>
+                            <div className="font-medium text-slate-200">{op.name}</div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1.5 font-mono">
+                              <span>{op.width.toFixed(2)} × {op.height.toFixed(2)} m</span>
+                              <span>•</span>
+                              <span>{wallLabels[op.wall || ''] || 'Automatyczna'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] font-mono font-semibold text-rose-400">
+                            -{opArea.toFixed(2)} m²
+                          </span>
+                          {onDeleteOpening && (
+                            <button
+                              onClick={() => onDeleteOpening(room.id, op.id)}
+                              className="text-slate-500 hover:text-rose-400 p-1 rounded-md transition"
+                              title="Usuń otwór"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Add Opening Buttons */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpeningType('window');
+                    setOpeningName('Okno dwuskrzydłowe');
+                    setOpeningWidth(1.2);
+                    setOpeningHeight(1.4);
+                    setOpeningWall('left');
+                    setOpeningSillHeight(0.85);
+                    setShowOpeningModal(true);
+                  }}
+                  className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-2 text-xs text-sky-300 hover:bg-sky-900/40 hover:border-sky-400 transition font-medium flex items-center justify-center gap-1.5"
+                >
+                  <Frame className="w-3.5 h-3.5" />
+                  <span>+ Dodaj Okno</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpeningType('door');
+                    setOpeningName('Drzwi pokojowe 80');
+                    setOpeningWidth(0.8);
+                    setOpeningHeight(2.05);
+                    setOpeningWall('right');
+                    setOpeningSillHeight(0);
+                    setShowOpeningModal(true);
+                  }}
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-2 text-xs text-emerald-300 hover:bg-emerald-900/40 hover:border-emerald-400 transition font-medium flex items-center justify-center gap-1.5"
+                >
+                  <DoorOpen className="w-3.5 h-3.5" />
+                  <span>+ Dodaj Drzwi</span>
+                </button>
+              </div>
+            </div>
+
             {/* Quick Add Outlet / Fixture Widget */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
@@ -603,8 +877,8 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             roomWidth={width}
             roomLength={length}
             roomHeight={height}
-            onApplyMeasuredDimensions={(w, l, h) => {
-              handleApplyDimensions(w, l, h);
+            onApplyMeasuredDimensions={(w, l, h, poly) => {
+              handleApplyDimensions(w, l, h, poly);
             }}
           />
         </div>
@@ -729,6 +1003,199 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-teal-500"
               >
                 Dodaj Mebel do Wizualizacji 3D
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Dodaj Otwór (Okno / Drzwi) */}
+      {showOpeningModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                {openingType === 'window' ? <Frame className="w-5 h-5 text-sky-400" /> : <DoorOpen className="w-5 h-5 text-emerald-400" />}
+                <h3 className="font-semibold text-slate-100">
+                  {openingType === 'window' ? 'Dodaj Okno' : 'Dodaj Drzwi'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowOpeningModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Type Switcher */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpeningType('window');
+                    setOpeningName('Okno standardowe 120 × 140');
+                    setOpeningWidth(1.2);
+                    setOpeningHeight(1.4);
+                    setOpeningSillHeight(0.85);
+                  }}
+                  className={`p-2.5 rounded-xl border font-semibold flex items-center justify-center gap-2 transition ${
+                    openingType === 'window' ? 'border-sky-500 bg-sky-950/40 text-sky-300' : 'border-slate-800 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  <Frame className="w-4 h-4" />
+                  <span>Okno</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpeningType('door');
+                    setOpeningName('Drzwi pokojowe 80');
+                    setOpeningWidth(0.8);
+                    setOpeningHeight(2.05);
+                    setOpeningSillHeight(0);
+                  }}
+                  className={`p-2.5 rounded-xl border font-semibold flex items-center justify-center gap-2 transition ${
+                    openingType === 'door' ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300' : 'border-slate-800 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  <DoorOpen className="w-4 h-4" />
+                  <span>Drzwi</span>
+                </button>
+              </div>
+
+              {/* Quick Size Presets */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-2">Gotowe standardy budowlane (PL):</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {openingType === 'window' ? (
+                    [
+                      { label: 'Standard 120 × 140', w: 1.2, h: 1.4 },
+                      { label: 'Wąskie 80 × 140', w: 0.8, h: 1.4 },
+                      { label: 'Tarasowe HS 240 × 220', w: 2.4, h: 2.2 },
+                      { label: 'Dachowe 78 × 118', w: 0.78, h: 1.18 },
+                    ].map((ps) => (
+                      <button
+                        key={ps.label}
+                        type="button"
+                        onClick={() => {
+                          setOpeningWidth(ps.w);
+                          setOpeningHeight(ps.h);
+                          setOpeningName(ps.label);
+                        }}
+                        className="p-2 rounded-lg border border-slate-800 bg-slate-950 hover:border-sky-500 text-slate-300 text-left transition"
+                      >
+                        <div className="font-semibold">{ps.label}</div>
+                        <div className="text-[10px] text-slate-500 font-mono font-bold">{(ps.w * ps.h).toFixed(2)} m²</div>
+                      </button>
+                    ))
+                  ) : (
+                    [
+                      { label: 'Pokojowe 80 × 205', w: 0.8, h: 2.05 },
+                      { label: 'Łazienkowe 70 × 205', w: 0.7, h: 2.05 },
+                      { label: 'Wejściowe 90 × 205', w: 0.9, h: 2.05 },
+                      { label: 'Dwuskrzydłowe 140 × 205', w: 1.4, h: 2.05 },
+                    ].map((ps) => (
+                      <button
+                        key={ps.label}
+                        type="button"
+                        onClick={() => {
+                          setOpeningWidth(ps.w);
+                          setOpeningHeight(ps.h);
+                          setOpeningName(ps.label);
+                        }}
+                        className="p-2 rounded-lg border border-slate-800 bg-slate-950 hover:border-emerald-500 text-slate-300 text-left transition"
+                      >
+                        <div className="font-semibold">{ps.label}</div>
+                        <div className="text-[10px] text-slate-500 font-mono font-bold">{(ps.w * ps.h).toFixed(2)} m²</div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Custom Dimensions Form */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Szerokość (m):</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.4"
+                    max="6.0"
+                    value={openingWidth}
+                    onChange={(e) => setOpeningWidth(parseFloat(e.target.value) || 0.8)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2 text-slate-100 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Wysokość (m):</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.5"
+                    max="4.0"
+                    value={openingHeight}
+                    onChange={(e) => setOpeningHeight(parseFloat(e.target.value) || 1.4)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2 text-slate-100 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Wall Assignment */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Umiejscowienie na ścianie:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'left', label: 'Ściana Lewa (Zachód)' },
+                    { id: 'right', label: 'Ściana Prawa (Wschód)' },
+                    { id: 'back', label: 'Ściana Tylna (Północ)' },
+                    { id: 'front', label: 'Ściana Przednia (Południe)' },
+                  ].map((w) => (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => setOpeningWall(w.id as WallPosition)}
+                      className={`p-2 rounded-lg border text-left transition ${
+                        openingWall === w.id ? 'border-teal-500 bg-teal-950/40 text-teal-300 font-semibold' : 'border-slate-800 bg-slate-950 text-slate-400'
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Formula Deduction Preview */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-slate-400 flex items-center justify-between">
+                <span>Odliczenie od powierzchni ścian:</span>
+                <span className="font-mono font-bold text-rose-400 text-sm">
+                  -{(openingWidth * openingHeight).toFixed(2)} m²
+                </span>
+              </div>
+
+              {/* Submit */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onAddOpening) {
+                    onAddOpening(room.id, {
+                      id: `op-${Date.now()}`,
+                      type: openingType,
+                      name: openingName,
+                      width: openingWidth,
+                      height: openingHeight,
+                      wall: openingWall,
+                      sillHeight: openingType === 'window' ? openingSillHeight : 0,
+                    });
+                  }
+                  setShowOpeningModal(false);
+                }}
+                className="w-full py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Dodaj do Pomieszczenia i Przelicz Ściany</span>
               </button>
             </div>
           </div>

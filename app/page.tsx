@@ -12,6 +12,7 @@ import {
   NotificationItem,
   RoomFurniture,
   RoomOutlet,
+  RoomOpening,
   RoomWorkStage,
   StageStatus,
   WorkLogEntry
@@ -210,13 +211,33 @@ export default function HomePage() {
     });
   }, [project, updateProject]);
 
-  // Update room dimensions
-  const handleUpdateRoomDimensions = useCallback((roomId: string, width: number, length: number, height: number) => {
-    const area = width * length;
-    const perimeter = 2 * (width + length);
+  // Update room dimensions & shape
+  const handleUpdateRoomDimensions = useCallback((
+    roomId: string,
+    width: number,
+    length: number,
+    height: number,
+    polygonVertices?: { x: number; y: number }[]
+  ) => {
+    let area = Math.round(width * length * 100) / 100;
+    let perimeter = Math.round(2 * (width + length) * 100) / 100;
+
+    if (polygonVertices && polygonVertices.length >= 3) {
+      let shoelace = 0;
+      let polyPerimeter = 0;
+      for (let i = 0; i < polygonVertices.length; i++) {
+        const next = polygonVertices[(i + 1) % polygonVertices.length];
+        const curr = polygonVertices[i];
+        shoelace += curr.x * next.y - next.x * curr.y;
+        polyPerimeter += Math.hypot(next.x - curr.x, next.y - curr.y);
+      }
+      area = Math.round((Math.abs(shoelace) / 2) * 100) / 100;
+      perimeter = Math.round(polyPerimeter * 100) / 100;
+    }
+
     const room = project.rooms.find((r) => r.id === roomId);
     const openingsArea = (room?.openings ?? []).reduce((sum, o) => sum + o.width * o.height, 0);
-    const wallArea = Math.max(0, perimeter * height - openingsArea);
+    const wallArea = Math.max(0, Math.round((perimeter * height - openingsArea) * 100) / 100);
 
     const updatedRooms = project.rooms.map((r) => {
       if (r.id !== roomId) return r;
@@ -228,6 +249,7 @@ export default function HomePage() {
         area,
         perimeter,
         wallArea,
+        polygonVertices: polygonVertices ?? r.polygonVertices,
       };
     });
 
@@ -235,6 +257,52 @@ export default function HomePage() {
       ...project,
       rooms: updatedRooms,
     });
+  }, [project, updateProject]);
+
+  // Openings management (Windows & Doors)
+  const handleAddOpening = useCallback((roomId: string, opening: RoomOpening) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      const newOpenings = [...(r.openings || []), opening];
+      const openingsArea = newOpenings.reduce((sum, o) => sum + o.width * o.height, 0);
+      const wallArea = Math.max(0, Math.round((r.perimeter * r.height - openingsArea) * 100) / 100);
+      return {
+        ...r,
+        openings: newOpenings,
+        wallArea,
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  const handleUpdateOpening = useCallback((roomId: string, opening: RoomOpening) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      const newOpenings = (r.openings || []).map((o) => (o.id === opening.id ? opening : o));
+      const openingsArea = newOpenings.reduce((sum, o) => sum + o.width * o.height, 0);
+      const wallArea = Math.max(0, Math.round((r.perimeter * r.height - openingsArea) * 100) / 100);
+      return {
+        ...r,
+        openings: newOpenings,
+        wallArea,
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
+  const handleDeleteOpening = useCallback((roomId: string, openingId: string) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      const newOpenings = (r.openings || []).filter((o) => o.id !== openingId);
+      const openingsArea = newOpenings.reduce((sum, o) => sum + o.width * o.height, 0);
+      const wallArea = Math.max(0, Math.round((r.perimeter * r.height - openingsArea) * 100) / 100);
+      return {
+        ...r,
+        openings: newOpenings,
+        wallArea,
+      };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
   }, [project, updateProject]);
 
   // Add furniture
@@ -574,6 +642,9 @@ export default function HomePage() {
           <ViewRoomScanMeasure
             room={currentRoom}
             onUpdateRoomDimensions={handleUpdateRoomDimensions}
+            onAddOpening={handleAddOpening}
+            onUpdateOpening={handleUpdateOpening}
+            onDeleteOpening={handleDeleteOpening}
             onAddFurniture={handleAddFurniture}
             onUpdateFurniture={handleUpdateFurniture}
             onDeleteFurniture={handleDeleteFurniture}
