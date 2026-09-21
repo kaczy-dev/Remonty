@@ -199,16 +199,46 @@ export const NotificationsDrawer: React.FC<NotificationsDrawerProps> = ({
                   </button>
                 </div>
 
-                {/* Optional Web Push activation pill */}
-                {onRequestPushPermission && pushPermissionState !== 'granted' && (
-                  <div className="flex items-center justify-between rounded-lg bg-teal-950/40 border border-teal-500/30 p-2 text-xs">
-                    <span className="text-teal-300 text-[11px]">Chcesz powiadomienia na telefon/pulpit?</span>
-                    <button
-                      onClick={onRequestPushPermission}
-                      className="rounded-md bg-teal-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-teal-500 transition"
-                    >
-                      Włącz Push
-                    </button>
+                {/* Web Notifications Status & Activation Banner */}
+                {onRequestPushPermission && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/80 border border-slate-800 p-2.5 text-xs">
+                    {pushPermissionState === 'granted' ? (
+                      <>
+                        <div className="flex items-center gap-2 text-emerald-300 text-[11px]">
+                          <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>Powiadomienia systemowe aktywne</span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                              new Notification('Renowacje u Kaczaka: Test powiadomienia', {
+                                body: 'Powiadomienia działają poprawnie! Otrzymasz alerty o schnięciu i usterkach.',
+                                icon: '/icon.svg',
+                              });
+                            }
+                          }}
+                          className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                        >
+                          Test alertu
+                        </button>
+                      </>
+                    ) : pushPermissionState === 'denied' ? (
+                      <div className="text-[11px] text-slate-400">
+                        Powiadomienia zablokowane w ustawieniach przeglądarki.
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-teal-300 text-[11px]">
+                          Otrzymuj alerty o schnięciu i terminach na telefon/pulpit
+                        </span>
+                        <button
+                          onClick={onRequestPushPermission}
+                          className="rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-teal-500 transition cursor-pointer shadow-xs shrink-0"
+                        >
+                          Włącz Powiadomienia
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

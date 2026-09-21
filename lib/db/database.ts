@@ -65,6 +65,16 @@ export async function dbGetAll<T>(storeName: string): Promise<T[]> {
   });
 }
 
+export async function dbGetAllKeys(storeName: string): Promise<IDBValidKey[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAllKeys();
+    req.onsuccess = () => resolve(req.result ?? []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function dbPut(storeName: string, value: unknown, key?: IDBValidKey): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {

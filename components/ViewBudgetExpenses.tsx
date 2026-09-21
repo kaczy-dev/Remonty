@@ -16,6 +16,7 @@ import { Expense, ExpenseCategory, RenovationProject } from '@/types/renovation'
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db/usePhotoSrc';
 import { ReceiptViewerModal } from '@/components/ReceiptViewerModal';
 import { ContractorManagerView } from '@/components/ContractorManagerView';
+import { BudgetBurnupChart } from '@/components/BudgetBurnupChart';
 import {
   Wallet,
   Receipt,
@@ -29,6 +30,7 @@ import {
   Camera,
   Paperclip,
   Users,
+  Activity,
 } from 'lucide-react';
 
 interface ViewBudgetExpensesProps {
@@ -83,7 +85,7 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
   onOpenReportModal,
   onUpdateExpenseReceipt,
 }) => {
-  const [costViewMode, setCostViewMode] = useState<'expenses' | 'contractors'>('expenses');
+  const [costViewMode, setCostViewMode] = useState<'expenses' | 'contractors' | 'burnup'>('expenses');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
   const [receiptFilter, setReceiptFilter] = useState<'all' | 'with_receipt' | 'no_receipt'>('all');
@@ -250,6 +252,19 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
             <Users className="w-3.5 h-3.5" />
             <span>Wykonawcy, Umowy & Stawki ({project.contractors?.length || 0})</span>
           </button>
+          <button
+            id="subview-burnup-btn"
+            type="button"
+            onClick={() => setCostViewMode('burnup')}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+              costViewMode === 'burnup'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Wykres Spalania & S-Curve</span>
+          </button>
         </div>
 
         {costViewMode === 'expenses' && (
@@ -279,6 +294,8 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
           project={project}
           onUpdateProject={onUpdateProject || (() => {})}
         />
+      ) : costViewMode === 'burnup' ? (
+        <BudgetBurnupChart project={project} />
       ) : (
         <>
           {/* Category Breakdown Progress Bars & Distribution */}

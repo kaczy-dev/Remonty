@@ -48,6 +48,11 @@ import { NotificationsDrawer } from '@/components/NotificationsDrawer';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
 import { useToast } from '@/components/ToastProvider';
 import { syncProjectNotifications } from '@/lib/notification-engine';
+import {
+  dispatchPendingNotifications,
+  updateAppBadge,
+  requestNotificationPermission,
+} from '@/lib/web-notifications';
 
 export default function HomePage() {
   const [project, setProject] = useState<RenovationProject>(() => {
@@ -79,6 +84,15 @@ export default function HomePage() {
       setPushPermissionState(Notification.permission);
     }
   }, []);
+
+  // Update app badge and dispatch native notifications when unread items change
+  React.useEffect(() => {
+    const unreadCount = project.notifications.filter((n) => !n.read).length;
+    updateAppBadge(unreadCount);
+    if (pushPermissionState === 'granted') {
+      dispatchPendingNotifications(project.notifications);
+    }
+  }, [project.notifications, pushPermissionState]);
 
   // Safely hydrate stored project (IndexedDB, migrating legacy localStorage data if present)
   // and theme on client without SSR mismatch. useLayoutEffect + a microtask hop apply the
@@ -828,19 +842,14 @@ export default function HomePage() {
           });
         }}
         onRequestPushPermission={async () => {
-          if (typeof window !== 'undefined' && 'Notification' in window) {
-            try {
-              const perm = await Notification.requestPermission();
-              setPushPermissionState(perm);
-              if (perm === 'granted') {
-                new Notification('Renowacje u Kaczaka: Powiadomienia włączone!', {
-                  body: 'Będziesz na bieżąco informowany o terminach prac i czasach schnięcia.',
-                  icon: '/icon.svg',
-                });
-              }
-            } catch (err) {
-              console.warn('Notification permission error', err);
-            }
+          const perm = await requestNotificationPermission();
+          setPushPermissionState(perm);
+          if (perm === 'granted') {
+            new Notification('Renowacje u Kaczaka: Powiadomienia włączone!', {
+              body: 'Będziesz na bieżąco informowany o terminach prac i czasach schnięcia.',
+              icon: '/icon.svg',
+            });
+            dispatchPendingNotifications(project.notifications);
           }
         }}
         pushPermissionState={pushPermissionState}
