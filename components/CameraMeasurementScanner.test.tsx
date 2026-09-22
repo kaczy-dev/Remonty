@@ -97,4 +97,22 @@ describe('CameraMeasurementScanner Component', () => {
     fireEvent.click(pitchCheckbox);
     expect(pitchCheckbox.checked).toBe(false);
   });
+
+  it('allows toggling AI edge detection assist button', () => {
+    render(
+      <CameraMeasurementScanner
+        roomWidth={4.5}
+        roomLength={5.2}
+        roomHeight={2.6}
+        onApplyMeasuredDimensions={vi.fn()}
+      />
+    );
+
+    const aiEdgeBtn = screen.getByTitle('Wykrywanie krawędzi i przyciąganie do listew/narożników');
+    expect(aiEdgeBtn).toBeDefined();
+    expect(aiEdgeBtn.textContent).toContain('AI Krawędzie');
+
+    fireEvent.click(aiEdgeBtn);
+    expect(aiEdgeBtn.textContent).toContain('AI Krawędzie');
+  });
 });

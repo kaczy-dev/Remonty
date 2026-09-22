@@ -26,11 +26,18 @@ import {
   Sparkles,
   CreditCard,
   Target,
+  Zap,
 } from 'lucide-react';
 import { MagnifierLoupe } from './MagnifierLoupe';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { ScaleCalibrationModal, AppliedCalibration } from './ScaleCalibrationModal';
 import { applyPitchTiltCorrection } from '@/lib/scale-calibration';
+import {
+  detectEdgesCanny,
+  findNearestEdgePoint,
+  EdgeDetectionResult,
+} from '@/lib/cv/canny-edge-detector';
+import { validatePolygonGeometry } from '@/lib/cv/polygon-validator';
 
 interface CameraMeasurementScannerProps {
   roomWidth: number;
@@ -122,10 +129,49 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   });
   const [enablePitchCompensation, setEnablePitchCompensation] = useState<boolean>(true);
 
+  // Computer Vision (Canny Edge Detection & Edge Snapping)
+  const [enableAiEdgeAssist, setEnableAiEdgeAssist] = useState<boolean>(true);
+  const [edgeDetectionResult, setEdgeDetectionResult] = useState<EdgeDetectionResult | null>(null);
+  const [isProcessingEdges, setIsProcessingEdges] = useState<boolean>(false);
+
+  // Polygon geometric validation (self-intersections check)
+  const polygonValidation = React.useMemo(() => {
+    if (scannerToolMode !== 'polygon_trace') return { isValid: true, isSelfIntersecting: false };
+    return validatePolygonGeometry(polygonPoints);
+  }, [scannerToolMode, polygonPoints]);
+
   // Width of visible frame at distance D: W_visible = 2 * D * tan(FOV/2)
   const visibleFrameWidthMeters = 2 * estimatedDistanceMeters * Math.tan((calibratedFovAngle * Math.PI) / 360);
   const aspect = 16 / 9;
   const visibleFrameHeightMeters = visibleFrameWidthMeters / aspect;
+
+  const runEdgeDetection = useCallback(() => {
+    const source = isFrozen ? frozenCanvasRef.current : videoRef.current;
+    if (!source) return;
+
+    try {
+      setIsProcessingEdges(true);
+      const offscreen = document.createElement('canvas');
+      const w = 320;
+      const h = 180;
+      offscreen.width = w;
+      offscreen.height = h;
+      const ctx = offscreen.getContext('2d');
+      if (!ctx) {
+        setIsProcessingEdges(false);
+        return;
+      }
+
+      ctx.drawImage(source, 0, 0, w, h);
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const result = detectEdgesCanny(imgData.data, w, h, { lowThreshold: 25, highThreshold: 60 });
+      setEdgeDetectionResult(result);
+      setIsProcessingEdges(false);
+    } catch (err) {
+      console.warn('Edge detection error:', err);
+      setIsProcessingEdges(false);
+    }
+  }, [isFrozen]);
 
   const handleApplyCalibration = useCallback((calib: AppliedCalibration) => {
     setEstimatedDistanceMeters(calib.estimatedDistanceMeters);
@@ -374,6 +420,9 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
         if (ctx) {
           ctx.drawImage(v, 0, 0, c.width, c.height);
           setIsFrozen(true);
+          if (enableAiEdgeAssist) {
+            setTimeout(() => runEdgeDetection(), 60);
+          }
         }
       }
     }
@@ -498,8 +547,22 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   const handleContainerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const rawX = Math.max(2, Math.min(98, ((e.clientX - rect.left) / rect.width) * 100));
-    const rawY = Math.max(2, Math.min(98, ((e.clientY - rect.top) / rect.height) * 100));
+    let rawX = Math.max(2, Math.min(98, ((e.clientX - rect.left) / rect.width) * 100));
+    let rawY = Math.max(2, Math.min(98, ((e.clientY - rect.top) / rect.height) * 100));
+
+    // AI Computer Vision edge snapping
+    if (enableAiEdgeAssist && edgeDetectionResult) {
+      const snap = findNearestEdgePoint({ x: rawX, y: rawY }, edgeDetectionResult, 8);
+      if (snap.isSnapped) {
+        rawX = snap.snappedPoint.x;
+        rawY = snap.snappedPoint.y;
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try {
+            navigator.vibrate(8);
+          } catch {}
+        }
+      }
+    }
 
     if (scannerToolMode === 'polygon_trace' && activeDraggingPolyIdx !== null) {
       let finalX = rawX;
@@ -558,7 +621,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const handleApplyToRoom = () => {
     if (!onApplyMeasuredDimensions) return;
     if (scannerToolMode === 'polygon_trace') {
-      if (polygonPoints.length < 3) return;
+      if (polygonPoints.length < 3 || !polygonValidation.isValid) return;
       const metricVertices = polygonPoints.map((p) => ({
         x: (p.x / 100) * visibleFrameWidthMeters,
         y: (p.y / 100) * visibleFrameHeightMeters,
@@ -660,6 +723,40 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               <span>Obrys Posadzki</span>
             </button>
           </div>
+
+          {/* AI Computer Vision Edge Snapping Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !enableAiEdgeAssist;
+              setEnableAiEdgeAssist(next);
+              if (next && !edgeDetectionResult) {
+                runEdgeDetection();
+              }
+            }}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition cursor-pointer shadow-xs ${
+              enableAiEdgeAssist
+                ? 'bg-teal-500/20 border-teal-400 text-teal-200'
+                : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Wykrywanie krawędzi i przyciąganie do listew/narożników"
+          >
+            <Zap className={`w-3.5 h-3.5 ${enableAiEdgeAssist ? 'text-teal-400' : 'text-slate-500'}`} />
+            <span>AI Krawędzie{isProcessingEdges ? '...' : ''}</span>
+          </button>
+
+          {/* iOS Safari DeviceOrientation Permission Unlock */}
+          {orientation.isSupported && orientation.permissionState === 'default' && (
+            <button
+              type="button"
+              onClick={() => orientation.requestPermission()}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-950/50 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-900/50 transition cursor-pointer"
+              title="Wymagane uprawnienie do żyroskopu w iOS Safari"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>Włącz Poziomicę (iOS)</span>
+            </button>
+          )}
 
           {/* Freeze Frame Button */}
           {isStreaming && (
@@ -1110,10 +1207,25 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               </div>
 
               <div className="flex items-center gap-2">
+                {scannerToolMode === 'polygon_trace' && !polygonValidation.isValid && (
+                  <span
+                    className="flex items-center gap-1 rounded-md bg-amber-950/80 border border-amber-600/60 px-2 py-0.5 text-[11px] font-bold text-amber-300"
+                    title={polygonValidation.errorMessage}
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Kształt ósemki</span>
+                  </span>
+                )}
                 <button
                   id="apply-measurement-to-room-btn"
                   onClick={handleApplyToRoom}
-                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1 text-xs font-bold text-white hover:bg-teal-500 transition shadow-sm cursor-pointer"
+                  disabled={scannerToolMode === 'polygon_trace' && !polygonValidation.isValid}
+                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1 text-xs font-bold text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm cursor-pointer"
+                  title={
+                    scannerToolMode === 'polygon_trace' && !polygonValidation.isValid
+                      ? polygonValidation.errorMessage
+                      : undefined
+                  }
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>
