@@ -84,6 +84,14 @@ export interface RoomWorkStage {
   order: number;
 }
 
+export interface RoomAtticRoof {
+  isAttic: boolean;
+  kneeWallHeightM: number; // np. 0.8 - 1.4 m (wysokość ścianki kolankowej)
+  roofPitchDeg: number; // np. 35 - 45° (kąt nachylenia połaci dachowej)
+  slopeWall: WallPosition | 'both_sides'; // na której ścianie znajduje się ścianka kolankowa i skos
+  hasSkylight?: boolean; // okno połaciowe (dachowe)
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -106,6 +114,7 @@ export interface Room {
   workStages?: RoomWorkStage[];
   isCompleted?: boolean;
   polygonVertices?: { x: number; y: number }[];
+  atticRoof?: RoomAtticRoof;
 }
 
 export type StageCategory = 

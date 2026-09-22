@@ -169,4 +169,74 @@ describe('ViewRoomScanMeasure Component', () => {
     const polygonElement = container.querySelector('polygon');
     expect(polygonElement).not.toBeNull();
   });
+
+  it('toggles attic roof mode and triggers onUpdateAtticRoof', () => {
+    const onUpdateAtticRoofMock = vi.fn();
+
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+        onUpdateAtticRoof={onUpdateAtticRoofMock}
+      />
+    );
+
+    // Look for the attic toggle in 3D tab
+    const atticToggle = screen.getByTestId('attic-toggle');
+    expect(atticToggle).not.toBeChecked();
+
+    fireEvent.click(atticToggle);
+
+    expect(onUpdateAtticRoofMock).toHaveBeenCalledWith(
+      'test-room-1',
+      expect.objectContaining({
+        isAttic: true,
+      })
+    );
+  });
+
+  it('renders attic metrics and allows adjusting knee wall and pitch when attic is enabled', () => {
+    const onUpdateAtticRoofMock = vi.fn();
+    const atticRoom: Room = {
+      ...mockRoom,
+      atticRoof: {
+        isAttic: true,
+        kneeWallHeightM: 1.0,
+        roofPitchDeg: 42,
+        slopeWall: 'both_sides',
+        hasSkylight: true,
+      },
+    };
+
+    render(
+      <ViewRoomScanMeasure
+        room={atticRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+        onUpdateAtticRoof={onUpdateAtticRoofMock}
+      />
+    );
+
+    // Attic badge in top bar
+    expect(screen.getByText(/Użytkowa \(PN-ISO\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Połać skosu G-K/i)).toBeInTheDocument();
+
+    // Attic card elements
+    const kneeSlider = screen.getByTestId('knee-wall-slider');
+    expect(kneeSlider).toBeInTheDocument();
+
+    fireEvent.change(kneeSlider, { target: { value: '1.20' } });
+    expect(onUpdateAtticRoofMock).toHaveBeenCalledWith(
+      'test-room-1',
+      expect.objectContaining({
+        kneeWallHeightM: 1.2,
+      })
+    );
+
+    // Norm info box should be visible
+    expect(screen.getByText(/Norma PN-ISO 9836/i)).toBeInTheDocument();
+  });
 });

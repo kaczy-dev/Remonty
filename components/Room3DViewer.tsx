@@ -1382,268 +1382,461 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       }
     });
 
-    // 1. Back Wall (along X axis at Z = -halfL - wallThick / 2, width = W + wallThick * 2)
-    const backOp = openingsByWall['back'];
-    const totalBackW = W + wallThick * 2;
-    if (!backOp) {
-      const backWallGeo = new THREE.BoxGeometry(totalBackW, H, wallThick);
-      const backWall = new THREE.Mesh(backWallGeo, backWallMat);
-      backWall.position.set(0, H / 2, -halfL - wallThick / 2);
-      backWall.receiveShadow = true;
-      backWall.castShadow = true;
-      roomGroup.add(backWall);
-    } else {
-      const opW = Math.min(backOp.width || 1.4, totalBackW * 0.7);
-      const opH = Math.min(backOp.height || 1.4, H * 0.85);
-      const isWin = backOp.type === 'window';
-      const sillH = isWin ? (backOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
-      const topH = Math.max(0, H - (sillH + opH));
-      const sideW = (totalBackW - opW) / 2;
+    // Determine wall heights when room is an attic with knee walls
+    const isAttic = Boolean(room.atticRoof?.isAttic);
+    const atticConfig = room.atticRoof;
+    const kneeH = isAttic
+      ? Math.min(H - 0.2, Math.max(0.3, atticConfig?.kneeWallHeightM ?? 1.0))
+      : H;
 
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), backWallMat);
-      p1.position.set(-totalBackW / 2 + sideW / 2, H / 2, -halfL - wallThick / 2);
-      p1.receiveShadow = true;
-      p1.castShadow = true;
-      roomGroup.add(p1);
+    const backWallHeight = isAttic && atticConfig?.slopeWall === 'back' ? kneeH : H;
+    const frontWallHeight = isAttic && atticConfig?.slopeWall === 'front' ? kneeH : H;
+    const leftWallHeight =
+      isAttic && (atticConfig?.slopeWall === 'left' || atticConfig?.slopeWall === 'both_sides')
+        ? kneeH
+        : H;
+    const rightWallHeight =
+      isAttic && (atticConfig?.slopeWall === 'right' || atticConfig?.slopeWall === 'both_sides')
+        ? kneeH
+        : H;
 
-      const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), backWallMat);
-      p2.position.set(totalBackW / 2 - sideW / 2, H / 2, -halfL - wallThick / 2);
-      p2.receiveShadow = true;
-      p2.castShadow = true;
-      roomGroup.add(p2);
+    if (room.polygonVertices && room.polygonVertices.length >= 3) {
+      // Polygonal Wall Segments Extrusion matching the exact polygon floor shape
+      const poly = room.polygonVertices;
+      const polyCenterX = W / 2;
+      const polyCenterZ = L / 2;
+      const n = poly.length;
 
-      if (sillH > 0.05) {
-        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), backWallMat);
-        pBelow.position.set(0, sillH / 2, -halfL - wallThick / 2);
-        pBelow.receiveShadow = true;
-        pBelow.castShadow = true;
-        roomGroup.add(pBelow);
-      }
-      if (topH > 0.05) {
-        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), backWallMat);
-        pAbove.position.set(0, H - topH / 2, -halfL - wallThick / 2);
-        pAbove.receiveShadow = true;
-        pAbove.castShadow = true;
-        roomGroup.add(pAbove);
-      }
+      for (let i = 0; i < n; i++) {
+        const nextI = (i + 1) % n;
+        const p1x = poly[i].x - polyCenterX;
+        const p1z = poly[i].y - polyCenterZ;
+        const p2x = poly[nextI].x - polyCenterX;
+        const p2z = poly[nextI].y - polyCenterZ;
 
-      if (isWin) {
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.08, opH - 0.08, 0.02), glassMat);
-        glass.position.set(0, sillH + opH / 2, -halfL - wallThick / 2);
-        roomGroup.add(glass);
+        const segLength = Math.hypot(p2x - p1x, p2z - p1z);
+        if (segLength < 0.05) continue;
 
-        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(opW, 0.05, wallThick + 0.04), frameMat);
-        wFrame.position.set(0, sillH, -halfL - wallThick / 2);
-        roomGroup.add(wFrame);
+        const midX = (p1x + p2x) / 2;
+        const midZ = (p1z + p2z) / 2;
+        const angleY = -Math.atan2(p2z - p1z, p2x - p1x);
 
-        if (sillH > 0.05) {
-          const parapet = new THREE.Mesh(new THREE.BoxGeometry(opW + 0.12, 0.035, wallThick + 0.1), parapetMat);
-          parapet.position.set(0, sillH, -halfL - wallThick / 2 + 0.04);
-          parapet.castShadow = true;
-          roomGroup.add(parapet);
+        let segHeight = H;
+        if (isAttic && atticConfig) {
+          if (
+            (atticConfig.slopeWall === 'left' && midX < -halfW * 0.3) ||
+            (atticConfig.slopeWall === 'right' && midX > halfW * 0.3) ||
+            (atticConfig.slopeWall === 'back' && midZ < -halfL * 0.3) ||
+            (atticConfig.slopeWall === 'front' && midZ > halfL * 0.3) ||
+            (atticConfig.slopeWall === 'both_sides' && Math.abs(midX) > halfW * 0.3)
+          ) {
+            segHeight = kneeH;
+          }
         }
-      } else {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.04, opH - 0.02, 0.04), doorMat);
-        door.position.set(0, opH / 2, -halfL - wallThick / 2);
-        door.castShadow = true;
-        roomGroup.add(door);
 
-        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.06), handleMat);
-        handle.position.set(opW * 0.35, 1.05, -halfL - wallThick / 2 + 0.03);
-        roomGroup.add(handle);
+        const segWallGeo = new THREE.BoxGeometry(segLength, segHeight, wallThick);
+        const segWall = new THREE.Mesh(segWallGeo, wallMat);
+        segWall.position.set(midX, segHeight / 2, midZ);
+        segWall.rotation.y = angleY;
+        segWall.receiveShadow = true;
+        segWall.castShadow = true;
+        roomGroup.add(segWall);
       }
-    }
-
-    // 2. Left Wall (along Z axis at X = -halfW - wallThick / 2, length = L)
-    const leftOp = openingsByWall['left'];
-    if (!leftOp) {
-      const leftWallGeo = new THREE.BoxGeometry(wallThick, H, L);
-      const leftWall = new THREE.Mesh(leftWallGeo, wallMat);
-      leftWall.position.set(-halfW - wallThick / 2, H / 2, 0);
-      leftWall.receiveShadow = true;
-      leftWall.castShadow = true;
-      roomGroup.add(leftWall);
     } else {
-      const opW = Math.min(leftOp.width || 1.4, L * 0.7);
-      const opH = Math.min(leftOp.height || 1.4, H * 0.85);
-      const isWin = leftOp.type === 'window';
-      const sillH = isWin ? (leftOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
-      const topH = Math.max(0, H - (sillH + opH));
-      const sideL = (L - opW) / 2;
-
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
-      p1.position.set(-halfW - wallThick / 2, H / 2, -halfL + sideL / 2);
-      p1.receiveShadow = true;
-      p1.castShadow = true;
-      roomGroup.add(p1);
-
-      const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
-      p2.position.set(-halfW - wallThick / 2, H / 2, halfL - sideL / 2);
-      p2.receiveShadow = true;
-      p2.castShadow = true;
-      roomGroup.add(p2);
-
-      if (sillH > 0.05) {
-        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
-        pBelow.position.set(-halfW - wallThick / 2, sillH / 2, 0);
-        pBelow.receiveShadow = true;
-        pBelow.castShadow = true;
-        roomGroup.add(pBelow);
-      }
-      if (topH > 0.05) {
-        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
-        pAbove.position.set(-halfW - wallThick / 2, H - topH / 2, 0);
-        pAbove.receiveShadow = true;
-        pAbove.castShadow = true;
-        roomGroup.add(pAbove);
-      }
-
-      if (isWin) {
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
-        glass.position.set(-halfW - wallThick / 2, sillH + opH / 2, 0);
-        roomGroup.add(glass);
-
-        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
-        wFrame.position.set(-halfW - wallThick / 2, sillH, 0);
-        roomGroup.add(wFrame);
-
-        if (sillH > 0.05) {
-          const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
-          parapet.position.set(-halfW - wallThick / 2 + 0.04, sillH, 0);
-          parapet.castShadow = true;
-          roomGroup.add(parapet);
-        }
+      // 1. Back Wall (along X axis at Z = -halfL - wallThick / 2, width = W + wallThick * 2)
+      const backOp = openingsByWall['back'];
+      const totalBackW = W + wallThick * 2;
+      if (!backOp) {
+        const backWallGeo = new THREE.BoxGeometry(totalBackW, backWallHeight, wallThick);
+        const backWall = new THREE.Mesh(backWallGeo, backWallMat);
+        backWall.position.set(0, backWallHeight / 2, -halfL - wallThick / 2);
+        backWall.receiveShadow = true;
+        backWall.castShadow = true;
+        roomGroup.add(backWall);
       } else {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
-        door.position.set(-halfW - wallThick / 2, opH / 2, 0);
-        door.castShadow = true;
-        roomGroup.add(door);
-
-        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
-        handle.position.set(-halfW - wallThick / 2 + 0.03, 1.05, opW * 0.35);
-        roomGroup.add(handle);
-      }
-    }
-
-    // 3. Right Wall (along Z axis at X = halfW + wallThick / 2, length = L)
-    const rightOp = openingsByWall['right'];
-    if (!rightOp) {
-      const rightWallGeo = new THREE.BoxGeometry(wallThick, H, L);
-      const rightWall = new THREE.Mesh(rightWallGeo, wallMat);
-      rightWall.position.set(halfW + wallThick / 2, H / 2, 0);
-      rightWall.receiveShadow = true;
-      rightWall.castShadow = true;
-      roomGroup.add(rightWall);
-    } else {
-      const opW = Math.min(rightOp.width || 0.9, L * 0.7);
-      const opH = Math.min(rightOp.height || 2.1, H * 0.9);
-      const isWin = rightOp.type === 'window';
-      const sillH = isWin ? (rightOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
-      const topH = Math.max(0, H - (sillH + opH));
-      const sideL = (L - opW) / 2;
-
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
-      p1.position.set(halfW + wallThick / 2, H / 2, -halfL + sideL / 2);
-      p1.receiveShadow = true;
-      p1.castShadow = true;
-      roomGroup.add(p1);
-
-      const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, H, sideL), wallMat);
-      p2.position.set(halfW + wallThick / 2, H / 2, halfL - sideL / 2);
-      p2.receiveShadow = true;
-      p2.castShadow = true;
-      roomGroup.add(p2);
-
-      if (sillH > 0.05) {
-        const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
-        pBelow.position.set(halfW + wallThick / 2, sillH / 2, 0);
-        pBelow.receiveShadow = true;
-        pBelow.castShadow = true;
-        roomGroup.add(pBelow);
-      }
-      if (topH > 0.05) {
-        const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
-        pAbove.position.set(halfW + wallThick / 2, H - topH / 2, 0);
-        pAbove.receiveShadow = true;
-        pAbove.castShadow = true;
-        roomGroup.add(pAbove);
-      }
-
-      if (isWin) {
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
-        glass.position.set(halfW + wallThick / 2, sillH + opH / 2, 0);
-        roomGroup.add(glass);
-
-        const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
-        wFrame.position.set(halfW + wallThick / 2, sillH, 0);
-        roomGroup.add(wFrame);
-
-        if (sillH > 0.05) {
-          const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
-          parapet.position.set(halfW + wallThick / 2 - 0.04, sillH, 0);
-          parapet.castShadow = true;
-          roomGroup.add(parapet);
-        }
-      } else {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
-        door.position.set(halfW + wallThick / 2, opH / 2, 0);
-        door.castShadow = true;
-        roomGroup.add(door);
-
-        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
-        handle.position.set(halfW + wallThick / 2 - 0.03, 1.05, opW * 0.35);
-        roomGroup.add(handle);
-      }
-    }
-
-    // 4. Front Wall (Sectioned or semi-transparent in cutaway)
-    if (!cutawayWalls) {
-      const frontOp = openingsByWall['front'];
-      if (!frontOp) {
-        const frontWallGeo = new THREE.BoxGeometry(W + wallThick * 2, H, wallThick);
-        const frontWall = new THREE.Mesh(frontWallGeo, wallMat);
-        frontWall.position.set(0, H / 2, halfL + wallThick / 2);
-        frontWall.receiveShadow = true;
-        roomGroup.add(frontWall);
-      } else {
-        const opW = Math.min(frontOp.width || 1.4, totalBackW * 0.7);
-        const opH = Math.min(frontOp.height || 1.4, H * 0.85);
-        const isWin = frontOp.type === 'window';
-        const sillH = isWin ? (frontOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
-        const topH = Math.max(0, H - (sillH + opH));
+        const opW = Math.min(backOp.width || 1.4, totalBackW * 0.7);
+        const opH = Math.min(backOp.height || 1.4, backWallHeight * 0.85);
+        const isWin = backOp.type === 'window';
+        const sillH = isWin ? (backOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+        const topH = Math.max(0, backWallHeight - (sillH + opH));
         const sideW = (totalBackW - opW) / 2;
 
-        const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), wallMat);
-        p1.position.set(-totalBackW / 2 + sideW / 2, H / 2, halfL + wallThick / 2);
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, backWallHeight, wallThick), backWallMat);
+        p1.position.set(-totalBackW / 2 + sideW / 2, backWallHeight / 2, -halfL - wallThick / 2);
         p1.receiveShadow = true;
+        p1.castShadow = true;
         roomGroup.add(p1);
 
-        const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, H, wallThick), wallMat);
-        p2.position.set(totalBackW / 2 - sideW / 2, H / 2, halfL + wallThick / 2);
+        const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, backWallHeight, wallThick), backWallMat);
+        p2.position.set(totalBackW / 2 - sideW / 2, backWallHeight / 2, -halfL - wallThick / 2);
         p2.receiveShadow = true;
+        p2.castShadow = true;
         roomGroup.add(p2);
 
         if (sillH > 0.05) {
-          const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), wallMat);
-          pBelow.position.set(0, sillH / 2, halfL + wallThick / 2);
+          const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), backWallMat);
+          pBelow.position.set(0, sillH / 2, -halfL - wallThick / 2);
+          pBelow.receiveShadow = true;
+          pBelow.castShadow = true;
           roomGroup.add(pBelow);
         }
         if (topH > 0.05) {
-          const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), wallMat);
-          pAbove.position.set(0, H - topH / 2, halfL + wallThick / 2);
+          const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), backWallMat);
+          pAbove.position.set(0, backWallHeight - topH / 2, -halfL - wallThick / 2);
+          pAbove.receiveShadow = true;
+          pAbove.castShadow = true;
           roomGroup.add(pAbove);
         }
+
+        if (isWin) {
+          const glass = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.08, opH - 0.08, 0.02), glassMat);
+          glass.position.set(0, sillH + opH / 2, -halfL - wallThick / 2);
+          roomGroup.add(glass);
+
+          const wFrame = new THREE.Mesh(new THREE.BoxGeometry(opW, 0.05, wallThick + 0.04), frameMat);
+          wFrame.position.set(0, sillH, -halfL - wallThick / 2);
+          roomGroup.add(wFrame);
+
+          if (sillH > 0.05) {
+            const parapet = new THREE.Mesh(new THREE.BoxGeometry(opW + 0.12, 0.035, wallThick + 0.1), parapetMat);
+            parapet.position.set(0, sillH, -halfL - wallThick / 2 + 0.04);
+            parapet.castShadow = true;
+            roomGroup.add(parapet);
+          }
+        } else {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(opW - 0.04, opH - 0.02, 0.04), doorMat);
+          door.position.set(0, opH / 2, -halfL - wallThick / 2);
+          door.castShadow = true;
+          roomGroup.add(door);
+
+          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.06), handleMat);
+          handle.position.set(opW * 0.35, 1.05, -halfL - wallThick / 2 + 0.03);
+          roomGroup.add(handle);
+        }
       }
-    } else {
-      // Half-height cutaway wall indicator for architectural section
-      const stubWallGeo = new THREE.BoxGeometry(W + wallThick * 2, 0.35, wallThick);
-      const stubWallMat = new THREE.MeshStandardMaterial({
-        color: '#334155',
-        roughness: 0.5,
+
+      // 2. Left Wall (along Z axis at X = -halfW - wallThick / 2, length = L)
+      const leftOp = openingsByWall['left'];
+      if (!leftOp) {
+        const leftWallGeo = new THREE.BoxGeometry(wallThick, leftWallHeight, L);
+        const leftWall = new THREE.Mesh(leftWallGeo, wallMat);
+        leftWall.position.set(-halfW - wallThick / 2, leftWallHeight / 2, 0);
+        leftWall.receiveShadow = true;
+        leftWall.castShadow = true;
+        roomGroup.add(leftWall);
+      } else {
+        const opW = Math.min(leftOp.width || 1.4, L * 0.7);
+        const opH = Math.min(leftOp.height || 1.4, leftWallHeight * 0.85);
+        const isWin = leftOp.type === 'window';
+        const sillH = isWin ? (leftOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+        const topH = Math.max(0, leftWallHeight - (sillH + opH));
+        const sideL = (L - opW) / 2;
+
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, leftWallHeight, sideL), wallMat);
+        p1.position.set(-halfW - wallThick / 2, leftWallHeight / 2, -halfL + sideL / 2);
+        p1.receiveShadow = true;
+        p1.castShadow = true;
+        roomGroup.add(p1);
+
+        const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, leftWallHeight, sideL), wallMat);
+        p2.position.set(-halfW - wallThick / 2, leftWallHeight / 2, halfL - sideL / 2);
+        p2.receiveShadow = true;
+        p2.castShadow = true;
+        roomGroup.add(p2);
+
+        if (sillH > 0.05) {
+          const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
+          pBelow.position.set(-halfW - wallThick / 2, sillH / 2, 0);
+          pBelow.receiveShadow = true;
+          pBelow.castShadow = true;
+          roomGroup.add(pBelow);
+        }
+        if (topH > 0.05) {
+          const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
+          pAbove.position.set(-halfW - wallThick / 2, leftWallHeight - topH / 2, 0);
+          pAbove.receiveShadow = true;
+          pAbove.castShadow = true;
+          roomGroup.add(pAbove);
+        }
+
+        if (isWin) {
+          const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
+          glass.position.set(-halfW - wallThick / 2, sillH + opH / 2, 0);
+          roomGroup.add(glass);
+
+          const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
+          wFrame.position.set(-halfW - wallThick / 2, sillH, 0);
+          roomGroup.add(wFrame);
+
+          if (sillH > 0.05) {
+            const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
+            parapet.position.set(-halfW - wallThick / 2 + 0.04, sillH, 0);
+            parapet.castShadow = true;
+            roomGroup.add(parapet);
+          }
+        } else {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
+          door.position.set(-halfW - wallThick / 2, opH / 2, 0);
+          door.castShadow = true;
+          roomGroup.add(door);
+
+          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
+          handle.position.set(-halfW - wallThick / 2 + 0.03, 1.05, opW * 0.35);
+          roomGroup.add(handle);
+        }
+      }
+
+      // 3. Right Wall (along Z axis at X = halfW + wallThick / 2, length = L)
+      const rightOp = openingsByWall['right'];
+      if (!rightOp) {
+        const rightWallGeo = new THREE.BoxGeometry(wallThick, rightWallHeight, L);
+        const rightWall = new THREE.Mesh(rightWallGeo, wallMat);
+        rightWall.position.set(halfW + wallThick / 2, rightWallHeight / 2, 0);
+        rightWall.receiveShadow = true;
+        rightWall.castShadow = true;
+        roomGroup.add(rightWall);
+      } else {
+        const opW = Math.min(rightOp.width || 0.9, L * 0.7);
+        const opH = Math.min(rightOp.height || 2.1, rightWallHeight * 0.9);
+        const isWin = rightOp.type === 'window';
+        const sillH = isWin ? (rightOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+        const topH = Math.max(0, rightWallHeight - (sillH + opH));
+        const sideL = (L - opW) / 2;
+
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, rightWallHeight, sideL), wallMat);
+        p1.position.set(halfW + wallThick / 2, rightWallHeight / 2, -halfL + sideL / 2);
+        p1.receiveShadow = true;
+        p1.castShadow = true;
+        roomGroup.add(p1);
+
+        const p2 = new THREE.Mesh(new THREE.BoxGeometry(wallThick, rightWallHeight, sideL), wallMat);
+        p2.position.set(halfW + wallThick / 2, rightWallHeight / 2, halfL - sideL / 2);
+        p2.receiveShadow = true;
+        p2.castShadow = true;
+        roomGroup.add(p2);
+
+        if (sillH > 0.05) {
+          const pBelow = new THREE.Mesh(new THREE.BoxGeometry(wallThick, sillH, opW), wallMat);
+          pBelow.position.set(halfW + wallThick / 2, sillH / 2, 0);
+          pBelow.receiveShadow = true;
+          pBelow.castShadow = true;
+          roomGroup.add(pBelow);
+        }
+        if (topH > 0.05) {
+          const pAbove = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topH, opW), wallMat);
+          pAbove.position.set(halfW + wallThick / 2, rightWallHeight - topH / 2, 0);
+          pAbove.receiveShadow = true;
+          pAbove.castShadow = true;
+          roomGroup.add(pAbove);
+        }
+
+        if (isWin) {
+          const glass = new THREE.Mesh(new THREE.BoxGeometry(0.02, opH - 0.08, opW - 0.08), glassMat);
+          glass.position.set(halfW + wallThick / 2, sillH + opH / 2, 0);
+          roomGroup.add(glass);
+
+          const wFrame = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.04, 0.05, opW), frameMat);
+          wFrame.position.set(halfW + wallThick / 2, sillH, 0);
+          roomGroup.add(wFrame);
+
+          if (sillH > 0.05) {
+            const parapet = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.035, opW + 0.12), parapetMat);
+            parapet.position.set(halfW + wallThick / 2 - 0.04, sillH, 0);
+            parapet.castShadow = true;
+            roomGroup.add(parapet);
+          }
+        } else {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(0.04, opH - 0.02, opW - 0.04), doorMat);
+          door.position.set(halfW + wallThick / 2, opH / 2, 0);
+          door.castShadow = true;
+          roomGroup.add(door);
+
+          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.12), handleMat);
+          handle.position.set(halfW + wallThick / 2 - 0.03, 1.05, opW * 0.35);
+          roomGroup.add(handle);
+        }
+      }
+
+      // 4. Front Wall (Sectioned or semi-transparent in cutaway)
+      if (!cutawayWalls) {
+        const frontOp = openingsByWall['front'];
+        if (!frontOp) {
+          const frontWallGeo = new THREE.BoxGeometry(W + wallThick * 2, frontWallHeight, wallThick);
+          const frontWall = new THREE.Mesh(frontWallGeo, wallMat);
+          frontWall.position.set(0, frontWallHeight / 2, halfL + wallThick / 2);
+          frontWall.receiveShadow = true;
+          roomGroup.add(frontWall);
+        } else {
+          const opW = Math.min(frontOp.width || 1.4, totalBackW * 0.7);
+          const opH = Math.min(frontOp.height || 1.4, frontWallHeight * 0.85);
+          const isWin = frontOp.type === 'window';
+          const sillH = isWin ? (frontOp.sillHeight ?? (opH >= 2.0 ? 0 : 0.85)) : 0;
+          const topH = Math.max(0, frontWallHeight - (sillH + opH));
+          const sideW = (totalBackW - opW) / 2;
+
+          const p1 = new THREE.Mesh(new THREE.BoxGeometry(sideW, frontWallHeight, wallThick), wallMat);
+          p1.position.set(-totalBackW / 2 + sideW / 2, frontWallHeight / 2, halfL + wallThick / 2);
+          p1.receiveShadow = true;
+          roomGroup.add(p1);
+
+          const p2 = new THREE.Mesh(new THREE.BoxGeometry(sideW, frontWallHeight, wallThick), wallMat);
+          p2.position.set(totalBackW / 2 - sideW / 2, frontWallHeight / 2, halfL + wallThick / 2);
+          p2.receiveShadow = true;
+          roomGroup.add(p2);
+
+          if (sillH > 0.05) {
+            const pBelow = new THREE.Mesh(new THREE.BoxGeometry(opW, sillH, wallThick), wallMat);
+            pBelow.position.set(0, sillH / 2, halfL + wallThick / 2);
+            roomGroup.add(pBelow);
+          }
+          if (topH > 0.05) {
+            const pAbove = new THREE.Mesh(new THREE.BoxGeometry(opW, topH, wallThick), wallMat);
+            pAbove.position.set(0, frontWallHeight - topH / 2, halfL + wallThick / 2);
+            roomGroup.add(pAbove);
+          }
+        }
+      } else {
+        // Half-height cutaway wall indicator for architectural section
+        const stubWallGeo = new THREE.BoxGeometry(W + wallThick * 2, 0.35, wallThick);
+        const stubWallMat = new THREE.MeshStandardMaterial({
+          color: '#334155',
+          roughness: 0.5,
+        });
+        const stubWall = new THREE.Mesh(stubWallGeo, stubWallMat);
+        stubWall.position.set(0, 0.35 / 2, halfL + wallThick / 2);
+        roomGroup.add(stubWall);
+      }
+    }
+
+    // --- 3b. ATTIC ROOF SLOPING CEILING PLANES ---
+    if (isAttic && atticConfig) {
+      const pitchDeg = Math.min(75, Math.max(20, atticConfig.roofPitchDeg || 40));
+      const pitchRad = (pitchDeg * Math.PI) / 180;
+      const deltaH = H - kneeH;
+      const slopeRun = Math.min(halfW, deltaH / Math.tan(pitchRad));
+      const slopeLen = deltaH / Math.sin(pitchRad);
+
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: room.design.ceilingColor || '#f8fafc',
+        roughness: 0.85,
+        side: THREE.DoubleSide,
       });
-      const stubWall = new THREE.Mesh(stubWallGeo, stubWallMat);
-      stubWall.position.set(0, 0.35 / 2, halfL + wallThick / 2);
-      roomGroup.add(stubWall);
+
+      // Slope on left
+      if (atticConfig.slopeWall === 'left' || atticConfig.slopeWall === 'both_sides') {
+        const slopeGeo = new THREE.PlaneGeometry(slopeLen, L + wallThick * 2);
+        const slopeMesh = new THREE.Mesh(slopeGeo, roofMat);
+        const midSlopeX = -halfW + slopeRun / 2;
+        const midSlopeY = kneeH + deltaH / 2;
+        slopeMesh.position.set(midSlopeX, midSlopeY, 0);
+        slopeMesh.rotation.y = Math.PI / 2;
+        slopeMesh.rotation.x = Math.PI / 2 - pitchRad;
+        slopeMesh.receiveShadow = true;
+        roomGroup.add(slopeMesh);
+
+        if (atticConfig.hasSkylight) {
+          const skylightGroup = new THREE.Group();
+          const skyFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(0.8, 1.2, 0.05),
+            new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.3 })
+          );
+          const skyGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.1), glassMat);
+          skyGlass.position.z = 0.03;
+          skylightGroup.add(skyFrame);
+          skylightGroup.add(skyGlass);
+          skylightGroup.position.set(midSlopeX + 0.01, midSlopeY, 0);
+          skylightGroup.rotation.y = Math.PI / 2;
+          skylightGroup.rotation.x = Math.PI / 2 - pitchRad;
+          roomGroup.add(skylightGroup);
+        }
+      }
+
+      // Slope on right
+      if (atticConfig.slopeWall === 'right' || atticConfig.slopeWall === 'both_sides') {
+        const slopeGeo = new THREE.PlaneGeometry(slopeLen, L + wallThick * 2);
+        const slopeMesh = new THREE.Mesh(slopeGeo, roofMat);
+        const midSlopeX = halfW - slopeRun / 2;
+        const midSlopeY = kneeH + deltaH / 2;
+        slopeMesh.position.set(midSlopeX, midSlopeY, 0);
+        slopeMesh.rotation.y = -Math.PI / 2;
+        slopeMesh.rotation.x = -(Math.PI / 2 - pitchRad);
+        slopeMesh.receiveShadow = true;
+        roomGroup.add(slopeMesh);
+
+        if (atticConfig.hasSkylight && (atticConfig.slopeWall === 'right' || atticConfig.slopeWall === 'both_sides')) {
+          const skylightGroup = new THREE.Group();
+          const skyFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(0.8, 1.2, 0.05),
+            new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.3 })
+          );
+          const skyGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.1), glassMat);
+          skyGlass.position.z = 0.03;
+          skylightGroup.add(skyFrame);
+          skylightGroup.add(skyGlass);
+          skylightGroup.position.set(midSlopeX - 0.01, midSlopeY, 0);
+          skylightGroup.rotation.y = -Math.PI / 2;
+          skylightGroup.rotation.x = -(Math.PI / 2 - pitchRad);
+          roomGroup.add(skylightGroup);
+        }
+      }
+
+      // Slope on back
+      if (atticConfig.slopeWall === 'back') {
+        const slopeRunZ = Math.min(halfL, deltaH / Math.tan(pitchRad));
+        const slopeLenZ = deltaH / Math.sin(pitchRad);
+        const slopeGeo = new THREE.PlaneGeometry(W + wallThick * 2, slopeLenZ);
+        const slopeMesh = new THREE.Mesh(slopeGeo, roofMat);
+        const midSlopeZ = -halfL + slopeRunZ / 2;
+        const midSlopeY = kneeH + deltaH / 2;
+        slopeMesh.position.set(0, midSlopeY, midSlopeZ);
+        slopeMesh.rotation.x = Math.PI / 2 - pitchRad;
+        slopeMesh.receiveShadow = true;
+        roomGroup.add(slopeMesh);
+
+        if (atticConfig.hasSkylight) {
+          const skylightGroup = new THREE.Group();
+          const skyFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 0.8, 0.05),
+            new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.3 })
+          );
+          const skyGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), glassMat);
+          skyGlass.position.z = 0.03;
+          skylightGroup.add(skyFrame);
+          skylightGroup.add(skyGlass);
+          skylightGroup.position.set(0, midSlopeY, midSlopeZ + 0.01);
+          skylightGroup.rotation.x = Math.PI / 2 - pitchRad;
+          roomGroup.add(skylightGroup);
+        }
+      }
+
+      // Slope on front
+      if (atticConfig.slopeWall === 'front') {
+        const slopeRunZ = Math.min(halfL, deltaH / Math.tan(pitchRad));
+        const slopeLenZ = deltaH / Math.sin(pitchRad);
+        const slopeGeo = new THREE.PlaneGeometry(W + wallThick * 2, slopeLenZ);
+        const slopeMesh = new THREE.Mesh(slopeGeo, roofMat);
+        const midSlopeZ = halfL - slopeRunZ / 2;
+        const midSlopeY = kneeH + deltaH / 2;
+        slopeMesh.position.set(0, midSlopeY, midSlopeZ);
+        slopeMesh.rotation.x = -(Math.PI / 2 - pitchRad);
+        slopeMesh.receiveShadow = true;
+        roomGroup.add(slopeMesh);
+
+        if (atticConfig.hasSkylight) {
+          const skylightGroup = new THREE.Group();
+          const skyFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 0.8, 0.05),
+            new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.3 })
+          );
+          const skyGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), glassMat);
+          skyGlass.position.z = 0.03;
+          skylightGroup.add(skyFrame);
+          skylightGroup.add(skyGlass);
+          skylightGroup.position.set(0, midSlopeY, midSlopeZ - 0.01);
+          skylightGroup.rotation.x = -(Math.PI / 2 - pitchRad);
+          roomGroup.add(skylightGroup);
+        }
+      }
     }
 
     // --- 4. CEILING & LED COVE ---

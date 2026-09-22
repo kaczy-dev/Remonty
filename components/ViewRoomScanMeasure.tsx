@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Room, RoomFurniture, RoomOutlet, RoomOpening, WallPosition } from '@/types/renovation';
+import { Room, RoomFurniture, RoomOutlet, RoomOpening, WallPosition, RoomAtticRoof } from '@/types/renovation';
 import {
   Camera,
   Ruler,
@@ -15,10 +15,13 @@ import {
   DoorOpen,
   Frame,
   Trash2,
+  Home,
+  Layers,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
 import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
+import { calculateAtticMetrics } from '@/lib/geometry/attic-calculator';
 
 interface ViewRoomScanMeasureProps {
   room: Room;
@@ -38,6 +41,7 @@ interface ViewRoomScanMeasureProps {
   onAddOutlet: (roomId: string, outlet: RoomOutlet) => void;
   onUpdateRoomDesign?: (roomId: string, design: Room['design']) => void;
   onUpdateRoomPhoto?: (roomId: string, photoUrl: string) => void;
+  onUpdateAtticRoof?: (roomId: string, atticRoof?: RoomAtticRoof) => void;
   onNavigateToStep?: (step: string) => void;
 }
 
@@ -53,6 +57,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   onAddOutlet,
   onUpdateRoomDesign,
   onUpdateRoomPhoto,
+  onUpdateAtticRoof,
 }) => {
   const [activeTab, setActiveTab] = useState<'3d' | 'blueprint' | 'camera_grid'>('3d');
 
@@ -102,6 +107,219 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     setHeight(newH);
     onUpdateRoomDimensions(room.id, newW, newL, newH, newPoly ?? room.polygonVertices);
   };
+
+  // Attic Roof Configuration & PN-ISO 9836 Metrics
+  const atticRoof: RoomAtticRoof = room.atticRoof || {
+    isAttic: false,
+    kneeWallHeightM: 1.0,
+    roofPitchDeg: 40,
+    slopeWall: 'both_sides',
+    hasSkylight: false,
+  };
+
+  const atticMetrics = calculateAtticMetrics(room.width, room.length, room.height, room.atticRoof);
+
+  const handleUpdateAttic = (updated: Partial<RoomAtticRoof>) => {
+    const nextConfig: RoomAtticRoof = {
+      ...atticRoof,
+      ...updated,
+    };
+    onUpdateAtticRoof?.(room.id, nextConfig);
+  };
+
+  const handleToggleAttic = (enabled: boolean) => {
+    const nextConfig: RoomAtticRoof = {
+      ...atticRoof,
+      isAttic: enabled,
+    };
+    onUpdateAtticRoof?.(room.id, nextConfig);
+  };
+
+  const renderAtticRoofCard = () => (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4 shadow-sm" data-testid="attic-roof-card">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className={`p-2 rounded-xl border ${atticRoof.isAttic ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
+            <Home className="w-4 h-4" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+              Poddasze / Skosy Dachowe
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 font-mono">
+                PN-ISO 9836
+              </span>
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              Ścianki kolankowe, kąt połaci i normowe odliczenia powierzchni użytkowej
+            </p>
+          </div>
+        </div>
+
+        {/* Toggle switch for Attic Mode */}
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={Boolean(atticRoof.isAttic)}
+            onChange={(e) => handleToggleAttic(e.target.checked)}
+            className="sr-only peer"
+            data-testid="attic-toggle"
+          />
+          <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+        </label>
+      </div>
+
+      {atticRoof.isAttic && (
+        <div className="space-y-4 pt-2 border-t border-slate-800/80">
+          {/* Sliders Grid: Knee wall & Pitch */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Knee Wall Height */}
+            <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800/70">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 font-medium">
+                  Ścianka kolankowa:
+                </span>
+                <span className="font-mono text-amber-400 font-bold bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/30">
+                  {atticRoof.kneeWallHeightM.toFixed(2)} m
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.30"
+                max={Math.max(0.5, Math.round((height - 0.2) * 100) / 100)}
+                step="0.05"
+                value={atticRoof.kneeWallHeightM}
+                onChange={(e) => handleUpdateAttic({ kneeWallHeightM: parseFloat(e.target.value) })}
+                className="w-full accent-amber-500 cursor-pointer h-1.5 rounded-lg bg-slate-800"
+                data-testid="knee-wall-slider"
+              />
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>0.30 m (niski skos)</span>
+                <span>{(height - 0.2).toFixed(2)} m (wysoki)</span>
+              </div>
+            </div>
+
+            {/* Roof Pitch Deg */}
+            <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800/70">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 font-medium">Kąt nachylenia dachu:</span>
+                <span className="font-mono text-amber-400 font-bold bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/30">
+                  {atticRoof.roofPitchDeg}°
+                </span>
+              </div>
+              <input
+                type="range"
+                min="20"
+                max="65"
+                step="1"
+                value={atticRoof.roofPitchDeg}
+                onChange={(e) => handleUpdateAttic({ roofPitchDeg: parseInt(e.target.value, 10) })}
+                className="w-full accent-amber-500 cursor-pointer h-1.5 rounded-lg bg-slate-800"
+                data-testid="roof-pitch-slider"
+              />
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>20° (łagodny)</span>
+                <span>40° (standard)</span>
+                <span>65° (stromy)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Slope Wall Position Selector */}
+          <div className="space-y-2">
+            <span className="text-xs font-semibold text-slate-300">Układ skosu dachu:</span>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+              {[
+                { id: 'both_sides', label: 'Dwuspadowy (2 strony)' },
+                { id: 'left', label: 'Lewa ściana' },
+                { id: 'right', label: 'Prawa ściana' },
+                { id: 'back', label: 'Tylna ściana' },
+                { id: 'front', label: 'Przednia ściana' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleUpdateAttic({ slopeWall: opt.id as any })}
+                  className={`px-2.5 py-1.5 text-xs rounded-xl border transition text-center font-medium ${
+                    atticRoof.slopeWall === opt.id
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-xs'
+                      : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Skylight toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950/60">
+            <div className="flex items-center gap-2">
+              <Frame className="w-4 h-4 text-sky-400" />
+              <div>
+                <span className="text-xs font-medium text-slate-200 block">Okno dachowe / połaciowe</span>
+                <span className="text-[10px] text-slate-400">Doświetlenie poddasza wbudowane w połać skośną 3D</span>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(atticRoof.hasSkylight)}
+                onChange={(e) => handleUpdateAttic({ hasSkylight: e.target.checked })}
+                className="sr-only peer"
+                data-testid="skylight-toggle"
+              />
+              <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+            </label>
+          </div>
+
+          {/* Construction Norm Metrics Card (PN-ISO 9836) */}
+          <div className="p-4 rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/30 to-slate-950 space-y-3">
+            <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+              <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5" />
+                Obmiary Poddasza & Norma PN-ISO 9836
+              </span>
+              <span className="text-[11px] font-mono text-amber-400 font-semibold">
+                Użytkowa: {atticMetrics.usableFloorAreaM2.toFixed(2)} m²
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Zabudowa skosów (G-K)</span>
+                <strong className="text-sm font-mono text-amber-300">{atticMetrics.slopeAreaM2.toFixed(2)} m²</strong>
+                <span className="text-[9px] text-slate-500 block">połać do wełny/płyt</span>
+              </div>
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Ścianka kolankowa</span>
+                <strong className="text-sm font-mono text-slate-200">{atticMetrics.kneeWallAreaM2.toFixed(2)} m²</strong>
+                <span className="text-[9px] text-slate-500 block">pionowa pod skosem</span>
+              </div>
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Długość połaci</span>
+                <strong className="text-sm font-mono text-slate-200">{atticMetrics.slopeLengthM.toFixed(2)} m</strong>
+                <span className="text-[9px] text-slate-500 block">profil CD60 po skosie</span>
+              </div>
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Sufit płaski (h={height.toFixed(2)}m)</span>
+                <strong className="text-sm font-mono text-teal-300">{atticMetrics.fullHeightCeilingWidthM.toFixed(2)} m</strong>
+                <span className="text-[9px] text-slate-500 block">pełna wysokość</span>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
+              <p className="font-semibold text-slate-300">Zasada zaliczania powierzchni użytkowej PN-ISO 9836:</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-400">
+                <span>• H ≥ 2.20 m: <strong className="text-emerald-400">100%</strong></span>
+                <span>• 1.40 m ≤ H &lt; 2.20 m: <strong className="text-amber-400">50%</strong></span>
+                <span>• H &lt; 1.40 m: <strong className="text-rose-400">0%</strong> (pow. pomocnicza)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // Reusable 2D Blueprint SVG Canvas
   const renderBlueprintCanvas = (compact = false) => (
@@ -462,10 +680,23 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
 
         {/* Calculated Room Metrics Badges */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="rounded-xl border border-teal-500/30 bg-teal-950/40 px-3 py-1.5 text-teal-300">
-            <span className="text-slate-400 text-[10px] uppercase block">Posadzka</span>
-            <strong className="text-sm font-mono">{room.area.toFixed(2)} m²</strong>
-          </div>
+          {room.atticRoof?.isAttic ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-950/40 px-3 py-1.5 text-amber-300" title="Powierzchnia użytkowa wg normy PN-ISO 9836">
+              <span className="text-slate-400 text-[10px] uppercase block">Użytkowa (PN-ISO)</span>
+              <strong className="text-sm font-mono">{atticMetrics.usableFloorAreaM2.toFixed(2)} m²</strong>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-teal-500/30 bg-teal-950/40 px-3 py-1.5 text-teal-300">
+              <span className="text-slate-400 text-[10px] uppercase block">Posadzka</span>
+              <strong className="text-sm font-mono">{room.area.toFixed(2)} m²</strong>
+            </div>
+          )}
+          {room.atticRoof?.isAttic && (
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/40 px-3 py-1.5 text-indigo-300" title="Powierzchnia skośnych połaci sufitu do zabudowy g-k i ocieplenia">
+              <span className="text-slate-400 text-[10px] uppercase block">Połać skosu G-K</span>
+              <strong className="text-sm font-mono">{atticMetrics.slopeAreaM2.toFixed(2)} m²</strong>
+            </div>
+          )}
           <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-1.5 text-slate-300">
             <span className="text-slate-400 text-[10px] uppercase block">Ściany netto</span>
             <strong className="text-sm font-mono">{room.wallArea.toFixed(1)} m²</strong>
@@ -563,6 +794,9 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Poddasze / Skosy Dachowe (PN-ISO 9836) */}
+          {renderAtticRoofCard()}
         </div>
       )}
 
@@ -809,6 +1043,9 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Poddasze / Skosy Dachowe (PN-ISO 9836) */}
+            {renderAtticRoofCard()}
 
             {/* Quick Add Outlet / Fixture Widget */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-3">

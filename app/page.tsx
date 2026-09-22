@@ -15,7 +15,8 @@ import {
   RoomOpening,
   RoomWorkStage,
   StageStatus,
-  WorkLogEntry
+  WorkLogEntry,
+  RoomAtticRoof,
 } from '@/types/renovation';
 import { 
   loadOrMigrateInitialProject, 
@@ -362,6 +363,15 @@ export default function HomePage() {
     updateProject({ ...project, rooms: updatedRooms });
   }, [project, updateProject]);
 
+  // Update attic roof configuration (knee wall, pitch, skylight)
+  const handleUpdateAtticRoof = useCallback((roomId: string, atticRoof?: RoomAtticRoof) => {
+    const updatedRooms = project.rooms.map((r) => {
+      if (r.id !== roomId) return r;
+      return { ...r, atticRoof };
+    });
+    updateProject({ ...project, rooms: updatedRooms });
+  }, [project, updateProject]);
+
   // Update room photo (a local IndexedDB photo reference, see lib/db/usePhotoSrc.ts)
   const handleUpdateRoomPhoto = useCallback((roomId: string, photoUrl: string) => {
     const updatedRooms = project.rooms.map((r) => {
@@ -651,6 +661,7 @@ export default function HomePage() {
             onAddOutlet={handleAddOutlet}
             onUpdateRoomDesign={handleUpdateRoomDesign}
             onUpdateRoomPhoto={handleUpdateRoomPhoto}
+            onUpdateAtticRoof={handleUpdateAtticRoof}
             onNavigateToStep={(s) => setActivePipelineStep(s as RenovationPipelineStep)}
           />
         );
