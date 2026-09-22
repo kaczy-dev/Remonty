@@ -24,9 +24,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  CreditCard,
+  Target,
 } from 'lucide-react';
 import { MagnifierLoupe } from './MagnifierLoupe';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
+import { ScaleCalibrationModal, AppliedCalibration } from './ScaleCalibrationModal';
+import { applyPitchTiltCorrection } from '@/lib/scale-calibration';
 
 interface CameraMeasurementScannerProps {
   roomWidth: number;
@@ -108,11 +112,28 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   // Calibration Scale (Estimated ratio meters per frame width at typical ~2.5m distance)
   const [estimatedDistanceMeters, setEstimatedDistanceMeters] = useState<number>(2.6);
   const [calibratedFovAngle, setCalibratedFovAngle] = useState<number>(68);
+  const [isCalibrationModalOpen, setIsCalibrationModalOpen] = useState<boolean>(false);
+  const [calibrationProfile, setCalibrationProfile] = useState<{
+    label: string;
+    isCustom: boolean;
+  }>({
+    label: 'Domyślna optyczna (2.6 m)',
+    isCustom: false,
+  });
+  const [enablePitchCompensation, setEnablePitchCompensation] = useState<boolean>(true);
 
   // Width of visible frame at distance D: W_visible = 2 * D * tan(FOV/2)
   const visibleFrameWidthMeters = 2 * estimatedDistanceMeters * Math.tan((calibratedFovAngle * Math.PI) / 360);
   const aspect = 16 / 9;
   const visibleFrameHeightMeters = visibleFrameWidthMeters / aspect;
+
+  const handleApplyCalibration = useCallback((calib: AppliedCalibration) => {
+    setEstimatedDistanceMeters(calib.estimatedDistanceMeters);
+    setCalibrationProfile({
+      label: calib.presetLabel,
+      isCustom: calib.presetId === 'custom',
+    });
+  }, []);
 
   const updateContainerRect = useCallback(() => {
     if (containerRef.current) {
@@ -141,21 +162,37 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     setPointB(last.pointB);
   };
 
-  // 2-Point Laser Distance
+  // 2-Point Laser Distance (with optional DeviceOrientation pitch/tilt compensation)
   const calculateRealDistance = useCallback((): number => {
     if (!pointA || !pointB) return 0;
     const dxPercent = (pointB.x - pointA.x) / 100;
     const dyPercent = (pointB.y - pointA.y) / 100;
 
     const dxMeters = dxPercent * visibleFrameWidthMeters;
-    const dyMeters = dyPercent * visibleFrameHeightMeters;
+    let dyMeters = dyPercent * visibleFrameHeightMeters;
+
+    if (enablePitchCompensation && orientation.pitch !== null) {
+      dyMeters = applyPitchTiltCorrection(
+        dyMeters,
+        orientation.pitch,
+        activeMeasureMode === 'wall_height' ? 90 : 45
+      );
+    }
 
     return Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters);
-  }, [pointA, pointB, visibleFrameWidthMeters, visibleFrameHeightMeters]);
+  }, [
+    pointA,
+    pointB,
+    visibleFrameWidthMeters,
+    visibleFrameHeightMeters,
+    enablePitchCompensation,
+    orientation.pitch,
+    activeMeasureMode,
+  ]);
 
   const measuredDistanceM = calculateRealDistance();
 
-  // Multi-Point Polygon Metrics: Perimeter & Real-World Area (Shoelace formula)
+  // Multi-Point Polygon Metrics: Perimeter & Real-World Area (Shoelace formula with pitch tilt correction)
   const calculatePolygonMetrics = useCallback(() => {
     if (polygonPoints.length < 3) return { perimeterM: 0, areaM2: 0, segmentDistances: [] as number[] };
 
@@ -168,7 +205,10 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       const p2 = polygonPoints[nextIdx];
 
       const dxM = ((p2.x - p1.x) / 100) * visibleFrameWidthMeters;
-      const dyM = ((p2.y - p1.y) / 100) * visibleFrameHeightMeters;
+      let dyM = ((p2.y - p1.y) / 100) * visibleFrameHeightMeters;
+      if (enablePitchCompensation && orientation.pitch !== null) {
+        dyM = applyPitchTiltCorrection(dyM, orientation.pitch, 45);
+      }
       const segDist = Math.hypot(dxM, dyM);
       segmentDistances.push(segDist);
       perimeter += segDist;
@@ -181,16 +221,27 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       const p2 = polygonPoints[nextIdx];
 
       const x1M = (p1.x / 100) * visibleFrameWidthMeters;
-      const y1M = (p1.y / 100) * visibleFrameHeightMeters;
+      let y1M = (p1.y / 100) * visibleFrameHeightMeters;
       const x2M = (p2.x / 100) * visibleFrameWidthMeters;
-      const y2M = (p2.y / 100) * visibleFrameHeightMeters;
+      let y2M = (p2.y / 100) * visibleFrameHeightMeters;
+
+      if (enablePitchCompensation && orientation.pitch !== null) {
+        y1M = applyPitchTiltCorrection(y1M, orientation.pitch, 45);
+        y2M = applyPitchTiltCorrection(y2M, orientation.pitch, 45);
+      }
 
       shoelaceSum += x1M * y2M - x2M * y1M;
     }
     const areaM2 = Math.abs(shoelaceSum) / 2;
 
     return { perimeterM: perimeter, areaM2, segmentDistances };
-  }, [polygonPoints, visibleFrameWidthMeters, visibleFrameHeightMeters]);
+  }, [
+    polygonPoints,
+    visibleFrameWidthMeters,
+    visibleFrameHeightMeters,
+    enablePitchCompensation,
+    orientation.pitch,
+  ]);
 
   const polygonMetrics = calculatePolygonMetrics();
 
@@ -1180,31 +1231,71 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
           )}
 
           {/* Distance & Calibration Module */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
-              <Sliders className="w-4 h-4" />
-              Kalibracja Optyczna
-            </h4>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                <Sliders className="w-4 h-4" />
+                Kalibracja Optyczna Skali
+              </h4>
+              <span className="text-[10px] font-mono text-teal-400/80 bg-teal-950/60 border border-teal-800/60 px-2 py-0.5 rounded-full">
+                {calibrationProfile.label}
+              </span>
+            </div>
 
-            <div className="space-y-1.5">
+            {/* Launch Calibration Modal Button */}
+            <button
+              type="button"
+              id="open-scale-calibration-modal-btn"
+              onClick={() => setIsCalibrationModalOpen(true)}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/40 py-2.5 px-3 text-xs font-bold text-teal-200 transition shadow-xs cursor-pointer"
+            >
+              <CreditCard className="w-4 h-4 text-teal-400" />
+              <span>Kalibruj wg Wzorca (Karta / A4 / Własny)</span>
+            </button>
+
+            {/* Manual Distance Slider */}
+            <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-300 font-medium">Szacowany dystans do ściany:</span>
-                <span className="font-mono text-teal-400 font-bold">{estimatedDistanceMeters.toFixed(1)} m</span>
+                <span className="text-slate-300 font-medium">Dystans kamery (skala):</span>
+                <span className="font-mono text-teal-400 font-bold">{estimatedDistanceMeters.toFixed(2)} m</span>
               </div>
               <input
                 type="range"
-                min="1.0"
+                min="0.5"
                 max="6.0"
-                step="0.1"
+                step="0.05"
                 value={estimatedDistanceMeters}
                 onChange={(e) => setEstimatedDistanceMeters(parseFloat(e.target.value))}
                 className="w-full accent-teal-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>1.0m (blisko)</span>
-                <span>3.0m (pokój)</span>
-                <span>6.0m (daleko)</span>
+                <span>0.5m (makro)</span>
+                <span>2.6m (standard)</span>
+                <span>6.0m (duża sala)</span>
               </div>
+            </div>
+
+            {/* Device Tilt / Pitch Compensation Toggle */}
+            <div className="pt-2.5 border-t border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs text-slate-300 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enablePitchCompensation}
+                    onChange={(e) => setEnablePitchCompensation(e.target.checked)}
+                    className="w-4 h-4 accent-teal-500 rounded cursor-pointer"
+                  />
+                  <span>Kompensacja kąta nachylenia (Pitch)</span>
+                </label>
+                {orientation.pitch !== null && (
+                  <span className="text-[10px] font-mono font-bold text-teal-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                    {orientation.pitch > 0 ? `+${orientation.pitch.toFixed(1)}°` : `${orientation.pitch.toFixed(1)}°`}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Koryguje perspektywiczne skróty pionowe przy celowaniu w posadzkę lub sufit pod kątem.
+              </p>
             </div>
 
             <div className="rounded-xl bg-slate-950 p-3 text-[11px] text-slate-400 space-y-1">
@@ -1222,6 +1313,15 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               </div>
             </div>
           </div>
+
+          {/* Scale Calibration Modal */}
+          <ScaleCalibrationModal
+            isOpen={isCalibrationModalOpen}
+            onClose={() => setIsCalibrationModalOpen(false)}
+            onApplyCalibration={handleApplyCalibration}
+            currentEstimatedDistance={estimatedDistanceMeters}
+            currentFovAngle={calibratedFovAngle}
+          />
         </div>
       </div>
     </div>

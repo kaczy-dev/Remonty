@@ -59,4 +59,42 @@ describe('CameraMeasurementScanner Component', () => {
     expect(undoBtn).toBeDefined();
     fireEvent.click(undoBtn);
   });
+
+  it('opens scale calibration modal and allows calibrating via reference object', () => {
+    render(
+      <CameraMeasurementScanner
+        roomWidth={4.5}
+        roomLength={5.2}
+        roomHeight={2.6}
+        onApplyMeasuredDimensions={vi.fn()}
+      />
+    );
+
+    const openCalibBtn = screen.getByText('Kalibruj wg Wzorca (Karta / A4 / Własny)');
+    fireEvent.click(openCalibBtn);
+
+    expect(screen.getByText('Kalibracja Optyczna Skali Pomiaru')).toBeDefined();
+    const applyCalibBtn = screen.getByText('Zastosuj Kalibrację');
+    fireEvent.click(applyCalibBtn);
+
+    // Modal closed
+    expect(screen.queryByText('Kalibracja Optyczna Skali Pomiaru')).toBeNull();
+  });
+
+  it('allows toggling pitch tilt compensation checkbox', () => {
+    render(
+      <CameraMeasurementScanner
+        roomWidth={4.5}
+        roomLength={5.2}
+        roomHeight={2.6}
+        onApplyMeasuredDimensions={vi.fn()}
+      />
+    );
+
+    const pitchCheckbox = screen.getByLabelText('Kompensacja kąta nachylenia (Pitch)') as HTMLInputElement;
+    expect(pitchCheckbox.checked).toBe(true);
+
+    fireEvent.click(pitchCheckbox);
+    expect(pitchCheckbox.checked).toBe(false);
+  });
 });
