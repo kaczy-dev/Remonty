@@ -4,9 +4,10 @@ import {
   calculateRoomProgress,
   getDefaultWorkStagesForRoom,
   getRoomWorkStages,
+  syncProjectStagesFromRooms,
 } from './progress-helper';
 import { INITIAL_RENOVATION_PROJECT } from './default-data';
-import { Room, RoomWorkStage } from '@/types/renovation';
+import { RenovationStage, Room, RoomWorkStage } from '@/types/renovation';
 
 const baseRoom = INITIAL_RENOVATION_PROJECT.rooms[0];
 
@@ -103,5 +104,108 @@ describe('calculateProjectProgress', () => {
     expect(summary.percent).toBe(10);
     expect(summary.completedRooms).toBe(1);
     expect(summary.pendingRooms).toBe(1);
+  });
+
+  describe('syncProjectStagesFromRooms', () => {
+    it('synchronizes global project stage progress based on room work stages category', () => {
+      const globalStages: RenovationStage[] = [
+        {
+          id: 'proj-stage-1',
+          name: 'Rozbiórki i przygotowanie',
+          category: 'demolition',
+          status: 'planned',
+          progressPercent: 0,
+          startDate: '2026-03-01',
+          endDate: '2026-03-07',
+          isDiy: true,
+          contractorCostEstimate: 2000,
+          diyCostEstimate: 500,
+          requiredTools: [],
+          safetyGear: [],
+          tasks: [],
+          description: '',
+        },
+      ];
+
+      // 2 rooms: in room A demolition is done, in room B demolition is in_progress (50%)
+      const roomA: Room = {
+        ...baseRoom,
+        id: 'room-a',
+        workStages: [
+          {
+            id: 'room-a-st-1',
+            name: 'Demontaże',
+            category: 'demolition',
+            completed: true,
+            status: 'done',
+            order: 1,
+            notes: '',
+          },
+        ],
+      };
+      const roomB: Room = {
+        ...baseRoom,
+        id: 'room-b',
+        workStages: [
+          {
+            id: 'room-b-st-1',
+            name: 'Demontaże',
+            category: 'demolition',
+            completed: false,
+            status: 'in_progress',
+            order: 1,
+            notes: '',
+          },
+        ],
+      };
+
+      const synced = syncProjectStagesFromRooms(globalStages, [roomA, roomB]);
+      expect(synced).toHaveLength(1);
+      // (100% + 50%) / 2 = 75%
+      expect(synced[0].progressPercent).toBe(75);
+      expect(synced[0].status).toBe('in_progress');
+    });
+
+    it('synchronizes room-specific stage when roomId is set', () => {
+      const stages: RenovationStage[] = [
+        {
+          id: 'proj-stage-r1',
+          roomId: 'room-custom',
+          name: 'Łazienka wykończenie',
+          category: 'finishing',
+          status: 'planned',
+          progressPercent: 0,
+          startDate: '2026-03-01',
+          endDate: '2026-03-07',
+          isDiy: false,
+          contractorCostEstimate: 5000,
+          diyCostEstimate: 2500,
+          requiredTools: [],
+          safetyGear: [],
+          tasks: [],
+          description: '',
+        },
+      ];
+
+      const room: Room = {
+        ...baseRoom,
+        id: 'room-custom',
+        workStages: [
+          {
+            id: 'st-fin',
+            name: 'Płytki',
+            category: 'finishing',
+            completed: true,
+            status: 'done',
+            order: 4,
+            notes: '',
+          },
+        ],
+      };
+
+      const synced = syncProjectStagesFromRooms(stages, [room]);
+      expect(synced[0].progressPercent).toBe(100);
+      expect(synced[0].status).toBe('done');
+    });
   });
 });

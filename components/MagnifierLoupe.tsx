@@ -63,7 +63,7 @@ export const MagnifierLoupe: React.FC<MagnifierLoupeProps> = ({
     // Render magnified source slice
     try {
       ctx.imageSmoothingEnabled = false; // Sharp pixel rendering for precise alignment
-      ctx.drawImage(sourceElement, srcX, srcY, viewW, viewH, 0, 0, size, size);
+      ctx.drawImage(el, srcX, srcY, viewW, viewH, 0, 0, size, size);
     } catch {
       // Fallback if cross-origin or video not ready
       ctx.fillStyle = '#0f172a';

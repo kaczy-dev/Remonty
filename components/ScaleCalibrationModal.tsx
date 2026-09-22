@@ -75,6 +75,15 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
     return calculateCalibratedScale(pointC1, pointC2, activeReferenceMeters, 16 / 9, currentFovAngle);
   }, [pointC1, pointC2, activeReferenceMeters, currentFovAngle]);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   // Nudge adjustment (+/- 0.2%)
@@ -113,13 +122,8 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
       presetLabel: selectedPresetId === 'custom' ? `Własny (${customDimensionCm} cm)` : selectedPreset.label,
       referenceDimensionMeters: activeReferenceMeters,
     });
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">

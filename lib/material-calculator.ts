@@ -59,6 +59,33 @@ export interface LevelingCompoundInput {
   storeName?: string;
 }
 
+export interface DrywallCalculationInput {
+  roomId: string;
+  roomName: string;
+  areaM2: number; // powierzchnia zabudowy (np. sufit podwieszany, skos poddasza, ścianka)
+  type: 'ceiling_or_slope' | 'partition_wall';
+  boardType?: 'standard_white' | 'moisture_green' | 'fire_red';
+  layers?: 1 | 2;
+  boardWidthM?: number; // default 1.2m
+  boardLengthM?: number; // default 2.6m
+  storeName?: string;
+}
+
+export interface WallOpeningDeductionOptions {
+  includeJambs?: boolean; // doliczanie ościeży/glifów wg zasad KNR (domyślnie true)
+  jambDepthM?: number; // głębokość węgarka / ościeża w metrach, default 0.18 m
+  knrThresholdM2?: number; // próg KNR powyżej którego odlicza się otwór (0 = precyzyjne odliczanie z glifami)
+}
+
+export interface NetWallAreaKNRResult {
+  grossWallAreaM2: number;
+  openingsTotalAreaM2: number;
+  deductedOpeningsAreaM2: number;
+  jambsAddedAreaM2: number;
+  netWallAreaM2: number;
+  explanation: string;
+}
+
 /**
  * Returns waste margin percentage based on layout pattern and material type.
  * Based on Polish construction practice and manufacturer recommendations (ITB).
@@ -492,6 +519,312 @@ export function calculateLevelingCompoundPackage(input: LevelingCompoundInput): 
   };
 
   return [levelingItem];
+}
+
+/**
+ * Calculates complete drywall construction package (zabudowa G-K, sufity podwieszane, skosy poddasza, ścianki działowe).
+ * Compliant with Polish ITB norms and manufacturer standards (Knauf, Rigips, Norgips).
+ */
+export function calculateDrywallPackage(input: DrywallCalculationInput): MaterialCalculation[] {
+  if (input.areaM2 <= 0) return [];
+  const layers = input.layers || 1;
+  const boardWidth = input.boardWidthM || 1.2;
+  const boardLength = input.boardLengthM || 2.6;
+  const singleBoardArea = boardWidth * boardLength; // e.g. 3.12 m2
+  const store = input.storeName || 'Castorama / Leroy Merlin';
+
+  // 1. Płyty G-K (10% zapasu na docinki)
+  const wasteMargin = 10;
+  const totalBoardArea = Number((input.areaM2 * layers * (1 + wasteMargin / 100)).toFixed(2));
+  const boardCount = Math.ceil(totalBoardArea / singleBoardArea);
+
+  const boardNames = {
+    standard_white: 'Płyta gipsowo-kartonowa standardowa GKB 12.5mm (biała)',
+    moisture_green: 'Płyta g-k impregnowana hydrofobowa GKBI 12.5mm (zielona - łazienkowa)',
+    fire_red: 'Płyta g-k ogniochronna GKF 12.5mm (różowa)',
+  };
+  const boardPrices = {
+    standard_white: 36,
+    moisture_green: 49,
+    fire_red: 45,
+  };
+  const bType = input.boardType || 'standard_white';
+  const unitPrice = boardPrices[bType];
+
+  const boardItem: MaterialCalculation = {
+    id: `mat-drywall-${Date.now()}-1`,
+    roomId: input.roomId,
+    name: `${boardNames[bType]} ${boardWidth}×${boardLength}m (${input.roomName})`,
+    category: 'ściany',
+    formulaExplanation: `Powierzchnia ${input.areaM2.toFixed(2)} m² × ${layers} warstw(y) + ${wasteMargin}% zapasu na docinki = ${totalBoardArea} m² (${boardCount} płyt po ${singleBoardArea.toFixed(2)} m²)`,
+    baseQuantity: Number((input.areaM2 * layers).toFixed(2)),
+    wasteMarginPercent: wasteMargin,
+    finalQuantity: boardCount,
+    unit: 'szt.',
+    estimatedUnitPrice: unitPrice,
+    totalPrice: boardCount * unitPrice,
+    purchased: false,
+    storeName: store,
+    packageSize: 1,
+    packagesCount: boardCount,
+  };
+
+  const results: MaterialCalculation[] = [boardItem];
+
+  if (input.type === 'ceiling_or_slope') {
+    // Profil CD60 (~3.2 mb/m2, sztangi 3m)
+    const cd60M = Number((input.areaM2 * 3.2).toFixed(1));
+    const cd60Pieces = Math.ceil(cd60M / 3);
+    const cd60Item: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-2`,
+      roomId: input.roomId,
+      name: 'Profil sufitowy CD60 główny/nośny (sztanga 3m)',
+      category: 'ściany',
+      formulaExplanation: `Norma ITB ~3.2 mb/m² × ${input.areaM2.toFixed(2)} m² = ${cd60M} mb (${cd60Pieces} sztang 3m)`,
+      baseQuantity: cd60M,
+      wasteMarginPercent: 5,
+      finalQuantity: cd60Pieces,
+      unit: 'szt.',
+      estimatedUnitPrice: 19,
+      totalPrice: cd60Pieces * 19,
+      purchased: false,
+      storeName: store,
+      packageSize: 3,
+      packagesCount: cd60Pieces,
+    };
+    results.push(cd60Item);
+
+    // Profil UD27 (~0.9 mb/m2, sztangi 3m)
+    const ud27M = Number((input.areaM2 * 0.9).toFixed(1));
+    const ud27Pieces = Math.ceil(ud27M / 3);
+    const ud27Item: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-3`,
+      roomId: input.roomId,
+      name: 'Profil przyścienny UD27 obwodowy (sztanga 3m)',
+      category: 'ściany',
+      formulaExplanation: `Norma ~0.9 mb/m² × ${input.areaM2.toFixed(2)} m² = ${ud27M} mb (${ud27Pieces} sztang 3m)`,
+      baseQuantity: ud27M,
+      wasteMarginPercent: 5,
+      finalQuantity: ud27Pieces,
+      unit: 'szt.',
+      estimatedUnitPrice: 13,
+      totalPrice: ud27Pieces * 13,
+      purchased: false,
+      storeName: store,
+      packageSize: 3,
+      packagesCount: ud27Pieces,
+    };
+    results.push(ud27Item);
+
+    // Wieszaki ES lub obrotowe (~3.2 szt./m2)
+    const hangersCount = Math.ceil(input.areaM2 * 3.2);
+    const hangersPacks = Math.ceil(hangersCount / 100);
+    const hangerItem: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-4`,
+      roomId: input.roomId,
+      name: 'Wieszaki bezpośrednie ES / obrotowe do profili CD60 (op. 100 szt.)',
+      category: 'ściany',
+      formulaExplanation: `Norma ~3.2 szt./m² × ${input.areaM2.toFixed(2)} m² = ${hangersCount} szt. (${hangersPacks} opakowań po 100 szt.)`,
+      baseQuantity: hangersCount,
+      wasteMarginPercent: 5,
+      finalQuantity: hangersPacks,
+      unit: 'opak.',
+      estimatedUnitPrice: 65,
+      totalPrice: hangersPacks * 65,
+      purchased: false,
+      storeName: store,
+      packageSize: 100,
+      packagesCount: hangersPacks,
+    };
+    results.push(hangerItem);
+  } else {
+    // partition_wall: Profile CW i UW
+    const cwM = Number((input.areaM2 * 2.0).toFixed(1));
+    const cwPieces = Math.ceil(cwM / 3);
+    const cwItem: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-2`,
+      roomId: input.roomId,
+      name: 'Profil słupkowy ścienny CW50/CW75 (sztanga 3m)',
+      category: 'ściany',
+      formulaExplanation: `Rozstaw słupków co 60cm (~2.0 mb/m²) × ${input.areaM2.toFixed(2)} m² = ${cwM} mb (${cwPieces} sztang 3m)`,
+      baseQuantity: cwM,
+      wasteMarginPercent: 5,
+      finalQuantity: cwPieces,
+      unit: 'szt.',
+      estimatedUnitPrice: 23,
+      totalPrice: cwPieces * 23,
+      purchased: false,
+      storeName: store,
+      packageSize: 3,
+      packagesCount: cwPieces,
+    };
+    results.push(cwItem);
+
+    const uwM = Number((input.areaM2 * 0.8).toFixed(1));
+    const uwPieces = Math.ceil(uwM / 3);
+    const uwItem: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-3`,
+      roomId: input.roomId,
+      name: 'Profil poziomy ścienny UW50/UW75 obwodowy (sztanga 3m)',
+      category: 'ściany',
+      formulaExplanation: `Montaż podłoga/strop (~0.8 mb/m²) × ${input.areaM2.toFixed(2)} m² = ${uwM} mb (${uwPieces} sztang 3m)`,
+      baseQuantity: uwM,
+      wasteMarginPercent: 5,
+      finalQuantity: uwPieces,
+      unit: 'szt.',
+      estimatedUnitPrice: 17,
+      totalPrice: uwPieces * 17,
+      purchased: false,
+      storeName: store,
+      packageSize: 3,
+      packagesCount: uwPieces,
+    };
+    results.push(uwItem);
+
+    // Wełna mineralna akustyczna
+    const woolM2 = Number((input.areaM2 * 1.05).toFixed(1));
+    const woolPacks = Math.ceil(woolM2 / 6.0); // paczka 6 m2
+    const woolItem: MaterialCalculation = {
+      id: `mat-drywall-${Date.now()}-4`,
+      roomId: input.roomId,
+      name: 'Wełna mineralna akustyczna do ścian G-K gr. 50/75mm (paczka ~6m²)',
+      category: 'ściany',
+      formulaExplanation: `Wygłuszenie ścianki: ${input.areaM2.toFixed(2)} m² + 5% = ${woolM2} m² (${woolPacks} paczek po 6m²)`,
+      baseQuantity: input.areaM2,
+      wasteMarginPercent: 5,
+      finalQuantity: woolPacks,
+      unit: 'opak.',
+      estimatedUnitPrice: 110,
+      totalPrice: woolPacks * 110,
+      purchased: false,
+      storeName: store,
+      packageSize: 6,
+      packagesCount: woolPacks,
+    };
+    results.push(woolItem);
+  }
+
+  // Wkręty do płyt g-k TN 3.5x25 (oraz 35 dla 2 warstw)
+  const screwsCount = Math.ceil(input.areaM2 * 19 * layers);
+  const screwPacks = Math.ceil(screwsCount / 500); // paczki 500 szt.
+  const screwsItem: MaterialCalculation = {
+    id: `mat-drywall-${Date.now()}-5`,
+    roomId: input.roomId,
+    name: 'Wkręty fosfatowane do płyt gipsowo-kartonowych TN 3.5x25 (op. 500 szt.)',
+    category: 'chemia_budowlana',
+    formulaExplanation: `Norma ~19 szt./m² na warstwę × ${input.areaM2.toFixed(2)} m² × ${layers} = ${screwsCount} szt. (${screwPacks} paczek)`,
+    baseQuantity: screwsCount,
+    wasteMarginPercent: 5,
+    finalQuantity: screwPacks,
+    unit: 'opak.',
+    estimatedUnitPrice: 28,
+    totalPrice: screwPacks * 28,
+    purchased: false,
+    storeName: store,
+    packageSize: 500,
+    packagesCount: screwPacks,
+  };
+  results.push(screwsItem);
+
+  // Masa szpachlowa do spoinowania (np. Uniflott) ~0.35 kg/m2 na warstwę
+  const fillerKg = Number((input.areaM2 * 0.35 * layers).toFixed(1));
+  const fillerBags = Math.ceil(fillerKg / 5); // worki 5kg
+  const fillerItem: MaterialCalculation = {
+    id: `mat-drywall-${Date.now()}-6`,
+    roomId: input.roomId,
+    name: 'Gips szpachlowy do spoinowania połączeń płyt G-K beztaśmowy/z taśmą (worek 5kg)',
+    category: 'chemia_budowlana',
+    formulaExplanation: `Zużycie ~0.35 kg/m² × ${input.areaM2.toFixed(2)} m² × ${layers} = ${fillerKg} kg (${fillerBags} worków 5kg)`,
+    baseQuantity: fillerKg,
+    wasteMarginPercent: 5,
+    finalQuantity: fillerBags,
+    unit: 'opak.',
+    estimatedUnitPrice: 39,
+    totalPrice: fillerBags * 39,
+    purchased: false,
+    storeName: store,
+    packageSize: 5,
+    packagesCount: fillerBags,
+  };
+  results.push(fillerItem);
+
+  // Taśma zbrojąca do spoin ~1.4 mb/m2
+  const tapeM = Number((input.areaM2 * 1.4 * layers).toFixed(1));
+  const tapeRolls = Math.ceil(tapeM / 25); // rolka 25m
+  const tapeItem: MaterialCalculation = {
+    id: `mat-drywall-${Date.now()}-7`,
+    roomId: input.roomId,
+    name: 'Taśma zbrojąca do połączeń płyt G-K z włókna szklanego/papierowa (rolka 25 mb)',
+    category: 'chemia_budowlana',
+    formulaExplanation: `Zużycie ~1.4 mb/m² × ${input.areaM2.toFixed(2)} m² × ${layers} = ${tapeM} mb (${tapeRolls} rolek 25m)`,
+    baseQuantity: tapeM,
+    wasteMarginPercent: 5,
+    finalQuantity: tapeRolls,
+    unit: 'opak.',
+    estimatedUnitPrice: 18,
+    totalPrice: tapeRolls * 18,
+    purchased: false,
+    storeName: store,
+    packageSize: 25,
+    packagesCount: tapeRolls,
+  };
+  results.push(tapeItem);
+
+  return results;
+}
+
+/**
+ * Calculates net wall area according to Polish construction estimating principles (KNR 2-02).
+ * Handles precise opening deductions and jamb (ościeża / glify) surface additions.
+ */
+export function calculateNetWallAreaKNR(
+  grossWallArea: number,
+  openings: Array<{ width: number; height: number; type?: string; name?: string }>,
+  options: WallOpeningDeductionOptions = {}
+): NetWallAreaKNRResult {
+  const includeJambs = options.includeJambs ?? true;
+  const jambDepth = options.jambDepthM ?? 0.18; // 18 cm standardowa głębokość ościeża
+  const threshold = options.knrThresholdM2 ?? 0; // 0 = precyzyjne odliczenie każdego otworu
+
+  let openingsTotalArea = 0;
+  let deductedArea = 0;
+  let jambsArea = 0;
+
+  for (const op of openings) {
+    const area = op.width * op.height;
+    openingsTotalArea += area;
+
+    if (area > threshold) {
+      deductedArea += area;
+      if (includeJambs) {
+        // Obwód glifu: nadproże (szerokość) + 2 węgarki pionowe (2 * wysokość)
+        const jambPerimeter = 2 * op.height + op.width;
+        jambsArea += jambPerimeter * jambDepth;
+      }
+    }
+  }
+
+  const netArea = Math.max(0, grossWallArea - deductedArea + jambsArea);
+
+  let explanation = `Ściany brutto: ${grossWallArea.toFixed(2)} m². `;
+  if (openings.length === 0) {
+    explanation += 'Brak otworów w ścianach.';
+  } else {
+    explanation += `Odliczono ${openings.length} otworów (-${deductedArea.toFixed(2)} m²). `;
+    if (includeJambs && jambsArea > 0) {
+      explanation += `Doliczono powierzchnię ościeży/glifów (+${jambsArea.toFixed(2)} m² przy głębokości ${(jambDepth * 100).toFixed(0)} cm wg KNR). `;
+    }
+    explanation += `Powierzchnia robocza netto: ${netArea.toFixed(2)} m².`;
+  }
+
+  return {
+    grossWallAreaM2: Math.round(grossWallArea * 100) / 100,
+    openingsTotalAreaM2: Math.round(openingsTotalArea * 100) / 100,
+    deductedOpeningsAreaM2: Math.round(deductedArea * 100) / 100,
+    jambsAddedAreaM2: Math.round(jambsArea * 100) / 100,
+    netWallAreaM2: Math.round(netArea * 100) / 100,
+    explanation,
+  };
 }
 
 /**

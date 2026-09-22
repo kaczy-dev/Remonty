@@ -27,6 +27,11 @@ describe('attic-calculator', () => {
     // Powierzchnia użytkowa powinna być mniejsza niż 20 m2 z powodu stref <2.2m
     expect(metrics.usableFloorAreaM2).toBeLessThan(20.0);
     expect(metrics.usableFloorAreaM2).toBeGreaterThan(15.0);
+
+    // Norma architektoniczna PN-ISO 9836 (h >= 1.90m zaliczana w 100%, poniżej 0%)
+    expect(metrics.usableFloorAreaArchitecturalM2).toBeDefined();
+    expect(metrics.usableFloorAreaArchitecturalM2).toBeLessThan(20.0);
+    expect(metrics.usableFloorAreaArchitecturalM2).toBeGreaterThan(14.0);
   });
 
   it('accurately handles both_sides slopes (dwuspadowy)', () => {

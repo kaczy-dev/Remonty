@@ -7,6 +7,8 @@ import {
   calculateWaterproofingPackage,
   calculatePlasterAndPaintPackage,
   calculateLevelingCompoundPackage,
+  calculateDrywallPackage,
+  calculateNetWallAreaKNR,
   groupMaterialsByStore,
   formatShoppingListForClipboard,
 } from './material-calculator';
@@ -213,6 +215,82 @@ describe('material-calculator', () => {
       expect(text).toContain('SKLEP: SALON PŁYTEK');
       expect(text).toContain('[DO KUPIENIA] Klej C2TE');
       expect(text).toContain('[KUPIŁEM] Gres 60x60');
+    });
+  });
+
+  describe('calculateDrywallPackage', () => {
+    it('calculates ceiling/slope drywall package with CD60 and UD27 profiles', () => {
+      const items = calculateDrywallPackage({
+        roomId: 'room-attic',
+        roomName: 'Poddasze',
+        areaM2: 25,
+        type: 'ceiling_or_slope',
+        boardType: 'moisture_green',
+      });
+
+      expect(items.length).toBeGreaterThanOrEqual(6);
+      const boards = items.find((i) => i.name.includes('Płyta g-k impregnowana'));
+      expect(boards).toBeDefined();
+      expect(boards?.finalQuantity).toBeGreaterThanOrEqual(8);
+
+      const cd60 = items.find((i) => i.name.includes('CD60'));
+      expect(cd60).toBeDefined();
+      expect(cd60?.finalQuantity).toBeGreaterThanOrEqual(25); // ~3.2m/m2 * 25 / 3 = 27
+
+      const ud27 = items.find((i) => i.name.includes('UD27'));
+      expect(ud27).toBeDefined();
+
+      const screws = items.find((i) => i.name.includes('Wkręty'));
+      expect(screws).toBeDefined();
+    });
+
+    it('calculates partition wall package with CW and UW profiles and acoustic wool', () => {
+      const items = calculateDrywallPackage({
+        roomId: 'room-wall',
+        roomName: 'Korytarz',
+        areaM2: 12,
+        type: 'partition_wall',
+        boardType: 'standard_white',
+        layers: 2,
+      });
+
+      const cw = items.find((i) => i.name.includes('CW50/CW75'));
+      expect(cw).toBeDefined();
+
+      const wool = items.find((i) => i.name.includes('Wełna mineralna'));
+      expect(wool).toBeDefined();
+    });
+  });
+
+  describe('calculateNetWallAreaKNR', () => {
+    it('accurately deducts window/door openings and adds jamb surfaces according to KNR rules', () => {
+      // Ściany brutto 50 m2, okno 1.2 x 1.4 = 1.68 m2, drzwi 0.8 x 2.0 = 1.60 m2
+      const openings = [
+        { width: 1.2, height: 1.4, type: 'window' },
+        { width: 0.8, height: 2.0, type: 'door' },
+      ];
+
+      const result = calculateNetWallAreaKNR(50.0, openings, {
+        includeJambs: true,
+        jambDepthM: 0.2, // 20 cm
+      });
+
+      expect(result.grossWallAreaM2).toBe(50.0);
+      expect(result.openingsTotalAreaM2).toBeCloseTo(3.28, 2);
+      expect(result.deductedOpeningsAreaM2).toBeCloseTo(3.28, 2);
+      // Glify okno: (2*1.4 + 1.2) * 0.2 = 4.0 * 0.2 = 0.80 m2
+      // Glify drzwi: (2*2.0 + 0.8) * 0.2 = 4.8 * 0.2 = 0.96 m2
+      // Razem glify = 1.76 m2
+      expect(result.jambsAddedAreaM2).toBeCloseTo(1.76, 2);
+      // Netto = 50 - 3.28 + 1.76 = 48.48 m2
+      expect(result.netWallAreaM2).toBeCloseTo(48.48, 2);
+      expect(result.explanation).toContain('KNR');
+    });
+
+    it('handles wall with no openings', () => {
+      const result = calculateNetWallAreaKNR(35.0, []);
+      expect(result.netWallAreaM2).toBe(35.0);
+      expect(result.jambsAddedAreaM2).toBe(0);
     });
   });
 });

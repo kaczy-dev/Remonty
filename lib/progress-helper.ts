@@ -1,4 +1,4 @@
-import { Room, RoomType, RoomWorkStage, StageCategory, StageStatus } from '@/types/renovation';
+import { RenovationStage, Room, RoomType, RoomWorkStage, StageCategory, StageStatus } from '@/types/renovation';
 
 /**
  * Generic 5-stage work template used to seed a room's checklist, regardless of room type.
@@ -252,4 +252,81 @@ export function calculateProjectProgress(rooms: Room[]): ProjectProgressSummary 
     completedArea,
     overallStatusText,
   };
+}
+
+/**
+ * Synchronizes project-level timeline stages (project.stages used in Gantt & EVM Burnup)
+ * with actual room-level work stages (room.workStages).
+ *
+ * For each project stage:
+ * - If stage.roomId is specified, syncs directly with that room's work stages in that category (or overall room progress).
+ * - If stage.roomId is omitted (global milestone), aggregates all room stages of matching category across rooms.
+ */
+export function syncProjectStagesFromRooms(
+  stages: RenovationStage[],
+  rooms: Room[]
+): RenovationStage[] {
+  if (!stages || stages.length === 0 || !rooms || rooms.length === 0) {
+    return stages;
+  }
+
+  return stages.map((stage) => {
+    // If the stage is mapped to a specific room
+    if (stage.roomId) {
+      const room = rooms.find((r) => r.id === stage.roomId);
+      if (!room) return stage;
+
+      const roomStages = getRoomWorkStages(room);
+      const matchingStage = roomStages.find((s) => s.category === stage.category);
+
+      if (matchingStage) {
+        const progress = matchingStage.completed || matchingStage.status === 'done'
+          ? 100
+          : matchingStage.status === 'in_progress'
+          ? 50
+          : 0;
+        const status: StageStatus = progress === 100 ? 'done' : progress > 0 ? 'in_progress' : 'planned';
+        return {
+          ...stage,
+          progressPercent: progress,
+          status,
+        };
+      } else {
+        const roomProgress = calculateRoomProgress(room);
+        const status: StageStatus = roomProgress.percent === 100 ? 'done' : roomProgress.percent > 0 ? 'in_progress' : 'planned';
+        return {
+          ...stage,
+          progressPercent: roomProgress.percent,
+          status,
+        };
+      }
+    }
+
+    // Global project stage: aggregate all room stages of matching category
+    const relevantRoomStages: { completed: boolean; status: StageStatus }[] = [];
+    rooms.forEach((room) => {
+      const roomStages = getRoomWorkStages(room);
+      const matched = roomStages.filter((s) => s.category === stage.category);
+      if (matched.length > 0) {
+        relevantRoomStages.push(...matched);
+      }
+    });
+
+    if (relevantRoomStages.length === 0) {
+      return stage;
+    }
+
+    const total = relevantRoomStages.length;
+    const completed = relevantRoomStages.filter((s) => s.completed || s.status === 'done').length;
+    const inProgress = relevantRoomStages.filter((s) => !s.completed && s.status === 'in_progress').length;
+
+    const avgProgress = Math.min(100, Math.round(((completed + inProgress * 0.5) / total) * 100));
+    const status: StageStatus = avgProgress === 100 ? 'done' : avgProgress > 0 ? 'in_progress' : 'planned';
+
+    return {
+      ...stage,
+      progressPercent: avgProgress,
+      status,
+    };
+  });
 }

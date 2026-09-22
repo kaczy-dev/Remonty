@@ -1,10 +1,15 @@
 /**
  * attic-calculator.ts
  * Obliczenia geometrii i powierzchni poddaszy ze skosami dachowymi i ścianką kolankową.
- * Zgodność z polską normą PN-ISO 9836 (powierzchnia użytkowa na poddaszu):
- * - wysokość >= 2.20 m: 100% powierzchni
- * - wysokość 1.40 m - 2.20 m: 50% powierzchni
- * - wysokość < 1.40 m: 0% powierzchni (powierzchnia pomocnicza)
+ * 
+ * Standardy powierzchni na poddaszu w Polsce:
+ * 1. Standard podatkowy (Ustawa o podatkach i opłatach lokalnych / norma PN-70/B-02365):
+ *    - wysokość h >= 2.20 m: 100% powierzchni
+ *    - wysokość 1.40 m <= h < 2.20 m: 50% powierzchni
+ *    - wysokość h < 1.40 m: 0% powierzchni (powierzchnia pomocnicza)
+ * 2. Standard architektoniczno-budowlany PN-ISO 9836:
+ *    - wysokość h >= 1.90 m: 100% powierzchni użytkowej
+ *    - wysokość h < 1.90 m: powierzchnia pomocnicza
  */
 
 import { RoomAtticRoof } from '@/types/renovation';
@@ -13,7 +18,8 @@ export interface AtticMetrics {
   isAttic: boolean;
   slopeAreaM2: number; // powierzchnia skośnej połaci sufitu (płyty g-k / ocieplenie)
   kneeWallAreaM2: number; // powierzchnia ścianki kolankowej
-  usableFloorAreaM2: number; // powierzchnia użytkowa wg normy PN-ISO 9836
+  usableFloorAreaM2: number; // powierzchnia użytkowa wg standardu podatkowego (100% dla h>=2.2m, 50% dla 1.4-2.2m)
+  usableFloorAreaArchitecturalM2?: number; // powierzchnia użytkowa architektoniczna (h >= 1.90m wg PN-ISO 9836)
   slopeLengthM: number; // długość połaci po skosie
   slopeRunFloorM: number; // rzut poziomy skosu na posadzkę
   fullHeightCeilingWidthM: number; // szerokość płaskiego sufitu na pełnej wysokości
@@ -36,6 +42,7 @@ export function calculateAtticMetrics(
       slopeAreaM2: 0,
       kneeWallAreaM2: 0,
       usableFloorAreaM2: nominalFloorArea,
+      usableFloorAreaArchitecturalM2: nominalFloorArea,
       slopeLengthM: 0,
       slopeRunFloorM: 0,
       fullHeightCeilingWidthM: roomWidthM,
@@ -70,10 +77,11 @@ export function calculateAtticMetrics(
   // Szerokość płaskiej części sufitu
   const flatCeilingSpan = Math.max(0, crossDimension - clampedSlopeRun * numSlopes);
 
-  // Obliczenie powierzchni użytkowej wg PN-ISO 9836
-  // Strefa < 1.40 m: h < 1.40
-  // Odległość od ścianki kolankowej do punktu h = 1.40 m:
-  let usableArea = nominalFloorArea;
+  // Obliczenie powierzchni użytkowej
+  // 1. Standard podatkowy (h < 1.4m = 0%, 1.4m <= h < 2.2m = 50%)
+  // 2. Standard architektoniczny PN-ISO 9836 (h >= 1.9m = 100%, h < 1.9m = 0%)
+  let usableAreaTax = nominalFloorArea;
+  let usableAreaArchitectural = nominalFloorArea;
 
   if (kneeH < 2.20) {
     // Odległość od ścianki do h = 1.40 m
@@ -87,15 +95,21 @@ export function calculateAtticMetrics(
     const zone140to220Span = Math.max(0, runTo220 - runTo140);
     const zone140to220Area = alongWallLength * zone140to220Span * numSlopes;
 
-    // Odejmujemy 100% strefy <1.4m i 50% strefy 1.4-2.2m
-    usableArea = Math.max(0, nominalFloorArea - zoneBelow140Area - zone140to220Area * 0.5);
+    // Standard podatkowy
+    usableAreaTax = Math.max(0, nominalFloorArea - zoneBelow140Area - zone140to220Area * 0.5);
+
+    // Standard PN-ISO 9836 (h >= 1.90m)
+    const runTo190 = kneeH < 1.90 ? Math.max(0, (1.90 - kneeH) / Math.tan(pitchRad)) : 0;
+    const zoneBelow190Area = alongWallLength * Math.min(clampedSlopeRun, runTo190) * numSlopes;
+    usableAreaArchitectural = Math.max(0, nominalFloorArea - zoneBelow190Area);
   }
 
   return {
     isAttic: true,
     slopeAreaM2,
     kneeWallAreaM2,
-    usableFloorAreaM2: Math.round(usableArea * 100) / 100,
+    usableFloorAreaM2: Math.round(usableAreaTax * 100) / 100,
+    usableFloorAreaArchitecturalM2: Math.round(usableAreaArchitectural * 100) / 100,
     slopeLengthM: Math.round(slopeLength * 100) / 100,
     slopeRunFloorM: Math.round(clampedSlopeRun * 100) / 100,
     fullHeightCeilingWidthM: Math.round(flatCeilingSpan * 100) / 100,
