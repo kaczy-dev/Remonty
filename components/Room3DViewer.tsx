@@ -62,6 +62,7 @@ import {
 } from 'lucide-react';
 import { usePhotoSrc, LOCAL_PHOTO_PREFIX, savePhotoBlob } from '@/lib/db';
 import { compressImage } from '@/lib/image-compressor';
+import { Export3DModal } from '@/components/Export3DModal';
 
 interface Room3DViewerProps {
   room: Room;
@@ -635,6 +636,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   }, [autoRotate]);
   const [activeCameraPreset, setActiveCameraPreset] = useState<CameraViewPreset>('isometric');
   const [isExporting, setIsExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [selectedElementInfo, setSelectedElementInfo] = useState<string | null>(null);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [isDraggingActive, setIsDraggingActive] = useState(false);
@@ -3637,6 +3639,17 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
             <span>{isExporting ? 'Render...' : 'Render HD'}</span>
           </button>
 
+          {/* 3D / AR Model Export */}
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3.5 py-1.5 text-xs font-bold text-slate-950 shadow-md hover:brightness-110 active:scale-95 transition"
+            title="Eksportuj model do formatu GLB / USDZ lub zobacz w AR (Rzeczywistość Rozszerzona)"
+            data-testid="open-export-modal-btn"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Eksport 3D / AR</span>
+          </button>
+
         </div>
 
       </div>
@@ -3679,6 +3692,14 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 3D Model Export & AR QuickLook Modal */}
+      <Export3DModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        room={room}
+        sceneObject={roomGroupRef.current}
+      />
 
     </div>
   );
