@@ -271,7 +271,10 @@ export const WorkLogJournal: React.FC<WorkLogJournalProps> = ({
 
   // Clean up object URLs on unmount
   const pendingPhotosRef = useRef(selectedPhotos);
-  pendingPhotosRef.current = selectedPhotos;
+  useEffect(() => {
+    pendingPhotosRef.current = selectedPhotos;
+  }, [selectedPhotos]);
+
   useEffect(() => {
     return () => {
       pendingPhotosRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));

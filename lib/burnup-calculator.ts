@@ -135,12 +135,20 @@ export function calculateBudgetBurnup(
     ? Math.round((costVariance / plannedSpendToDate) * 100)
     : 0;
 
-  // Cost Performance Index (CPI)
-  // If spent is 0 but planned > 0, CPI is good (1.2)
+  // Earned Value (EV) calculation according to EVM standards:
+  // EV = sum(stageBudget * progressPercent)
+  const earnedValueToDate = stageCosts.reduce((sum, sc, idx) => {
+    const stage = project.stages[idx];
+    const progress = stage ? Math.max(0, Math.min(100, stage.progressPercent || 0)) / 100 : 0;
+    return sum + sc.cost * progress;
+  }, 0);
+
+  // Cost Performance Index (CPI) according to EVM standard: CPI = EV / AC (with PV / AC fallback if progress not recorded)
+  const valueBasis = earnedValueToDate > 0 ? earnedValueToDate : plannedSpendToDate;
   let cpi = 1.0;
-  if (totalSpentToDate > 0 && plannedSpendToDate > 0) {
-    cpi = Number((plannedSpendToDate / totalSpentToDate).toFixed(2));
-  } else if (totalSpentToDate > 0 && plannedSpendToDate === 0) {
+  if (totalSpentToDate > 0 && valueBasis > 0) {
+    cpi = Number((valueBasis / totalSpentToDate).toFixed(2));
+  } else if (totalSpentToDate > 0 && valueBasis === 0) {
     cpi = 0.8;
   }
 

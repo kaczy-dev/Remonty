@@ -30,7 +30,7 @@ const KNOWN_STORES: StoreRule[] = [
   },
   {
     name: 'OBI',
-    keywords: ['obi polska', 'obi market', '\bobi\b'],
+    keywords: ['obi polska', 'obi market', 'obi'],
     defaultCategory: 'Materiały budowlane',
   },
   {
@@ -78,15 +78,40 @@ const KNOWN_STORES: StoreRule[] = [
     keywords: ['agata meble', 'salony agata'],
     defaultCategory: 'Wykończenie i dekoracje',
   },
+  {
+    name: 'Praktiker / OBI / Inne',
+    keywords: ['praktiker', 'majster'],
+    defaultCategory: 'Materiały budowlane',
+  },
 ];
 
 /**
  * Normalizes Polish currency strings into a float number.
  * e.g. "1 450,99" -> 1450.99
+ * e.g. "1.450,99" -> 1450.99
+ * e.g. "1,450.99" -> 1450.99
  */
 export function normalizePrice(raw: string): number | null {
   if (!raw) return null;
-  const cleaned = raw.replace(/\s+/g, '').replace(',', '.');
+  let cleaned = raw.trim().replace(/\s+/g, '').replace(/(?:pln|zł|zl)$/i, '');
+  if (!cleaned) return null;
+
+  const lastDot = cleaned.lastIndexOf('.');
+  const lastComma = cleaned.lastIndexOf(',');
+
+  if (lastDot !== -1 && lastComma !== -1) {
+    if (lastComma > lastDot) {
+      // e.g. "1.450,99" -> dot is thousand separator, comma is decimal
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else {
+      // e.g. "1,450.99" -> comma is thousand separator, dot is decimal
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (lastComma !== -1) {
+    // Only comma present, e.g. "1450,99"
+    cleaned = cleaned.replace(',', '.');
+  }
+
   const val = parseFloat(cleaned);
   return isNaN(val) ? null : Math.round(val * 100) / 100;
 }
@@ -167,7 +192,12 @@ export function detectStore(text: string): { name: string; defaultCategory: Expe
   const lower = text.toLowerCase();
   for (const store of KNOWN_STORES) {
     for (const kw of store.keywords) {
-      if (lower.includes(kw.toLowerCase())) {
+      if (kw.length <= 3) {
+        const regex = new RegExp(`(?:^|[^a-ząćęłńóśźż0-9])${kw}(?:[^a-ząćęłńóśźż0-9]|$)`, 'i');
+        if (regex.test(text)) {
+          return { name: store.name, defaultCategory: store.defaultCategory };
+        }
+      } else if (lower.includes(kw.toLowerCase())) {
         return { name: store.name, defaultCategory: store.defaultCategory };
       }
     }
@@ -266,8 +296,7 @@ export async function tryScanFiscalQRCode(fileOrBlob: Blob | File): Promise<Pars
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const BarcodeDetectorClass = (window as any).BarcodeDetector;
+    const BarcodeDetectorClass = (window as unknown as { BarcodeDetector: new (opts: { formats: string[] }) => { detect: (img: ImageBitmap) => Promise<{ rawValue?: string }[]> } }).BarcodeDetector;
     const detector = new BarcodeDetectorClass({ formats: ['qr_code', 'data_matrix'] });
 
     const img = await createImageBitmap(fileOrBlob);

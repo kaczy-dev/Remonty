@@ -13,6 +13,9 @@ describe('receipt-parser', () => {
   describe('normalizePrice', () => {
     it('handles commas and spaces', () => {
       expect(normalizePrice('1 450,99')).toBe(1450.99);
+      expect(normalizePrice('1.450,99')).toBe(1450.99);
+      expect(normalizePrice('1,450.99')).toBe(1450.99);
+      expect(normalizePrice('12.350,50 zł')).toBe(12350.50);
       expect(normalizePrice('35,50')).toBe(35.50);
       expect(normalizePrice('100')).toBe(100);
       expect(normalizePrice('invalid')).toBeNull();
@@ -87,6 +90,16 @@ describe('receipt-parser', () => {
       const store = detectStore(text);
       expect(store?.name).toBe('IKEA');
       expect(store?.defaultCategory).toBe('Wykończenie i dekoracje');
+    });
+
+    it('detects OBI store and does not match unrelated words', () => {
+      const textObi = 'OBI SP. Z O.O. WARSZAWA';
+      const store = detectStore(textObi);
+      expect(store?.name).toBe('OBI');
+      expect(store?.defaultCategory).toBe('Materiały budowlane');
+
+      const falsePositive = 'Kobieta kupiła farby';
+      expect(detectStore(falsePositive)).toBeNull();
     });
   });
 

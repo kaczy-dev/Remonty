@@ -29,7 +29,8 @@ interface Export3DModalProps {
   isOpen: boolean;
   onClose: () => void;
   room: Room;
-  sceneObject: THREE.Object3D | null;
+  sceneObject?: THREE.Object3D | null;
+  getSceneObject?: () => THREE.Object3D | null;
 }
 
 export const Export3DModal: React.FC<Export3DModalProps> = ({
@@ -37,6 +38,7 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
   onClose,
   room,
   sceneObject,
+  getSceneObject,
 }) => {
   const [isExportingGlb, setIsExportingGlb] = useState(false);
   const [isExportingUsdz, setIsExportingUsdz] = useState(false);
@@ -48,8 +50,13 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
 
   const { isIOS, isAndroid, isMobile } = detectDevicePlatform();
 
+  const resolveTargetObject = (): THREE.Object3D | null => {
+    return sceneObject || getSceneObject?.() || null;
+  };
+
   const handleExportGLB = async () => {
-    if (!sceneObject) {
+    const target = resolveTargetObject();
+    if (!target) {
       setErrorMessage('Scena 3D nie jest jeszcze gotowa do eksportu.');
       return;
     }
@@ -57,7 +64,7 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
     setIsExportingGlb(true);
 
     try {
-      const result = await exportToGLB(sceneObject, `pokoj_${room.name}`);
+      const result = await exportToGLB(target, `pokoj_${room.name}`);
       triggerFileDownload(result.blob, result.filename);
       setLastExport(result);
     } catch (err) {
@@ -69,7 +76,8 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
   };
 
   const handleExportUSDZ = async () => {
-    if (!sceneObject) {
+    const target = resolveTargetObject();
+    if (!target) {
       setErrorMessage('Scena 3D nie jest jeszcze gotowa do eksportu.');
       return;
     }
@@ -77,7 +85,7 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
     setIsExportingUsdz(true);
 
     try {
-      const result = await exportToUSDZ(sceneObject, `pokoj_ar_${room.name}`);
+      const result = await exportToUSDZ(target, `pokoj_ar_${room.name}`);
       triggerFileDownload(result.blob, result.filename);
       setLastExport(result);
     } catch (err) {
@@ -89,7 +97,8 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
   };
 
   const handleLaunchAR = async () => {
-    if (!sceneObject) {
+    const target = resolveTargetObject();
+    if (!target) {
       setErrorMessage('Scena 3D nie jest jeszcze gotowa do podglądu AR.');
       return;
     }
@@ -99,11 +108,11 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
     try {
       if (isIOS) {
         // Natywne Apple AR Quick Look
-        const result = await exportToUSDZ(sceneObject, `ar_${room.name}`);
+        const result = await exportToUSDZ(target, `ar_${room.name}`);
         launchAppleARQuickLook(result.blob, result.filename);
       } else {
         // Na Android lub Desktopie - wygeneruj i pobierz model GLB
-        const result = await exportToGLB(sceneObject, `pokoj_${room.name}`);
+        const result = await exportToGLB(target, `pokoj_${room.name}`);
         triggerFileDownload(result.blob, result.filename);
         setLastExport(result);
       }
@@ -121,6 +130,14 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn select-none"
@@ -129,7 +146,12 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
       }}
       data-testid="export-3d-modal"
     >
-      <div className="relative w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl p-6 sm:p-7 space-y-6 max-h-[90vh] overflow-y-auto">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-3d-modal-title"
+        className="relative w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl p-6 sm:p-7 space-y-6 max-h-[90vh] overflow-y-auto"
+      >
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-800/80 pb-4">
           <div className="flex items-center gap-3">
@@ -137,7 +159,7 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+              <h3 id="export-3d-modal-title" className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 Eksport Modelu 3D & Wirtualny Spacer AR
               </h3>
               <p className="text-xs text-slate-400">
@@ -149,6 +171,7 @@ export const Export3DModal: React.FC<Export3DModalProps> = ({
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
             title="Zamknij"
+            aria-label="Zamknij okno eksportu 3D"
           >
             <X className="w-5 h-5" />
           </button>

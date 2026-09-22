@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 
 /**
+ * Creates a Three.js CanvasTexture configured with sRGB color space for correct gamma
+ */
+function makeSRGBTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
  * Creates a realistic procedural wood parquet / herringbone texture
  */
 export function createWoodTexture(type: 'herringbone' | 'plank' = 'plank', tintHex: string = '#b48256'): THREE.CanvasTexture {
@@ -10,7 +19,7 @@ export function createWoodTexture(type: 'herringbone' | 'plank' = 'plank', tintH
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
-    return new THREE.CanvasTexture(canvas);
+    return makeSRGBTexture(canvas);
   }
 
   // Base background
@@ -87,7 +96,7 @@ export function createWoodTexture(type: 'herringbone' | 'plank' = 'plank', tintH
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -103,7 +112,7 @@ export function createTileTexture(tintHex: string = '#334155'): THREE.CanvasText
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
 
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 1024, 1024);
@@ -137,7 +146,7 @@ export function createTileTexture(tintHex: string = '#334155'): THREE.CanvasText
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -152,7 +161,7 @@ export function createMarbleTexture(tintHex: string = '#f8fafc', veinHex?: strin
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 1024, 1024);
@@ -198,7 +207,7 @@ export function createMarbleTexture(tintHex: string = '#f8fafc', veinHex?: strin
   ctx.lineWidth = 1.5;
   ctx.strokeRect(0, 0, 1024, 1024);
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -213,7 +222,7 @@ export function createTerrazzoTexture(tintHex: string = '#cbd5e1'): THREE.Canvas
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 1024, 1024);
@@ -252,7 +261,7 @@ export function createTerrazzoTexture(tintHex: string = '#cbd5e1'): THREE.Canvas
   ctx.strokeRect(0, 512, 512, 512);
   ctx.strokeRect(512, 512, 512, 512);
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -267,7 +276,7 @@ export function createWoodSlatsTexture(woodHex: string = '#b48256', gapHex: stri
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   // Dark acoustic felt backing
   ctx.fillStyle = gapHex;
@@ -301,7 +310,7 @@ export function createWoodSlatsTexture(woodHex: string = '#b48256', gapHex: stri
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -316,7 +325,7 @@ export function createConcretePanelsTexture(tintHex: string = '#64748b'): THREE.
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 1024, 1024);
@@ -367,7 +376,7 @@ export function createConcretePanelsTexture(tintHex: string = '#64748b'): THREE.
     drawTieHole(p.x + 472, p.y + 472);
   });
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -382,7 +391,7 @@ export function createSubwayTileTexture(tintHex: string = '#f8fafc'): THREE.Canv
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   // Dark or light grout
   ctx.fillStyle = '#64748b';
@@ -412,7 +421,7 @@ export function createSubwayTileTexture(tintHex: string = '#f8fafc'): THREE.Canv
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3, 3);
@@ -427,7 +436,7 @@ export function createStuccoTexture(tintHex: string = '#f1f5f9'): THREE.CanvasTe
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 512, 512);
@@ -441,7 +450,7 @@ export function createStuccoTexture(tintHex: string = '#f1f5f9'): THREE.CanvasTe
     ctx.fillRect(x, y, 2, 2);
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(4, 4);
@@ -456,7 +465,7 @@ export function createMicrocementTexture(tintHex: string = '#64748b'): THREE.Can
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = tintHex;
   ctx.fillRect(0, 0, 512, 512);
@@ -478,7 +487,7 @@ export function createMicrocementTexture(tintHex: string = '#64748b'): THREE.Can
     ctx.fill();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3, 3);
@@ -493,7 +502,7 @@ export function createBrickTexture(tintHex: string = '#9a3412'): THREE.CanvasTex
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return makeSRGBTexture(canvas);
 
   ctx.fillStyle = '#8c857b'; // mortar background
   ctx.fillRect(0, 0, 1024, 1024);
@@ -520,7 +529,7 @@ export function createBrickTexture(tintHex: string = '#9a3412'): THREE.CanvasTex
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = makeSRGBTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 3);

@@ -3,7 +3,8 @@
 import React, { useRef, useEffect } from 'react';
 
 interface MagnifierLoupeProps {
-  sourceElement: HTMLVideoElement | HTMLCanvasElement | null;
+  sourceElement?: HTMLVideoElement | HTMLCanvasElement | null;
+  getSourceElement?: () => HTMLVideoElement | HTMLCanvasElement | null;
   point: { x: number; y: number } | null; // percentage coordinates 0..100
   containerRect: DOMRect | null;
   zoom?: number;
@@ -14,6 +15,7 @@ interface MagnifierLoupeProps {
 
 export const MagnifierLoupe: React.FC<MagnifierLoupeProps> = ({
   sourceElement,
+  getSourceElement,
   point,
   containerRect,
   zoom = 3,
@@ -24,7 +26,8 @@ export const MagnifierLoupe: React.FC<MagnifierLoupeProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!visible || !point || !sourceElement || !canvasRef.current) return;
+    const el = sourceElement || getSourceElement?.() || null;
+    if (!visible || !point || !el || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -34,12 +37,12 @@ export const MagnifierLoupe: React.FC<MagnifierLoupeProps> = ({
     let srcWidth = 0;
     let srcHeight = 0;
 
-    if (sourceElement instanceof HTMLVideoElement) {
-      srcWidth = sourceElement.videoWidth || sourceElement.clientWidth || 1280;
-      srcHeight = sourceElement.videoHeight || sourceElement.clientHeight || 720;
-    } else if (sourceElement instanceof HTMLCanvasElement) {
-      srcWidth = sourceElement.width;
-      srcHeight = sourceElement.height;
+    if (el instanceof HTMLVideoElement) {
+      srcWidth = el.videoWidth || el.clientWidth || 1280;
+      srcHeight = el.videoHeight || el.clientHeight || 720;
+    } else if (el instanceof HTMLCanvasElement) {
+      srcWidth = el.width;
+      srcHeight = el.height;
     }
 
     if (srcWidth === 0 || srcHeight === 0) return;
@@ -113,7 +116,7 @@ export const MagnifierLoupe: React.FC<MagnifierLoupeProps> = ({
     ctx.arc(mid, mid, 2, 0, Math.PI * 2);
     ctx.fillStyle = '#f43f5e'; // Rose red center dot
     ctx.fill();
-  }, [visible, point, sourceElement, zoom, size]);
+  }, [visible, point, sourceElement, getSourceElement, zoom, size]);
 
   if (!visible || !point || !containerRect) return null;
 

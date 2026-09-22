@@ -76,16 +76,15 @@ export default function HomePage() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
   const [storageSaveFailed, setStorageSaveFailed] = useState(false);
-  const [pushPermissionState, setPushPermissionState] = useState<string>('default');
+  const [pushPermissionState, setPushPermissionState] = useState<string>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
 
   const { showToast } = useToast();
   const isOnline = useOnlineStatus();
-
-  React.useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setPushPermissionState(Notification.permission);
-    }
-  }, []);
 
   // Update app badge and dispatch native notifications when unread items change
   React.useEffect(() => {
@@ -802,7 +801,7 @@ export default function HomePage() {
       />
 
       {/* Core Dynamic Content Area with Step Transitions */}
-      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-8 space-y-6">
         {/* Visual Renovation Progress Indicator Banner on Main Screen */}
         {activePipelineStep !== 'progress' && (
           <ProjectProgressIndicator

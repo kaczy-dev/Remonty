@@ -17,33 +17,21 @@ export function useDeviceOrientation(): DeviceOrientationData {
   const [pitch, setPitch] = useState<number | null>(null);
   const [roll, setRoll] = useState<number | null>(null);
   const [yaw, setYaw] = useState<number | null>(null);
-  const [isSupported, setIsSupported] = useState<boolean>(false);
-  const [permissionState, setPermissionState] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      setPermissionState('unsupported');
-      return;
+  const [isSupported] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && 'DeviceOrientationEvent' in window;
+  });
+  const [permissionState, setPermissionState] = useState<'default' | 'granted' | 'denied' | 'unsupported'>(() => {
+    if (typeof window === 'undefined' || !('DeviceOrientationEvent' in window)) {
+      return 'unsupported';
     }
-
-    if (!('DeviceOrientationEvent' in window)) {
-      setIsSupported(false);
-      setPermissionState('unsupported');
-      return;
-    }
-
-    setIsSupported(true);
-
-    // iOS requires explicit permission check
     const DeviceOrientationEventAny = window.DeviceOrientationEvent as unknown as {
       requestPermission?: () => Promise<'granted' | 'denied'>;
     };
-
     if (typeof DeviceOrientationEventAny.requestPermission !== 'function') {
-      // Android / standard desktop Chrome auto-grants
-      setPermissionState('granted');
+      return 'granted';
     }
-  }, []);
+    return 'default';
+  });
 
   const handleOrientation = useCallback((e: DeviceOrientationEvent) => {
     if (e.beta !== null && e.beta !== undefined) {

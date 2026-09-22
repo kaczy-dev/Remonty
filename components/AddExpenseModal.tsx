@@ -126,7 +126,10 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   };
 
   const receiptPreviewUrlRef = useRef<string | null>(null);
-  receiptPreviewUrlRef.current = receiptPreviewUrl;
+
+  useEffect(() => {
+    receiptPreviewUrlRef.current = receiptPreviewUrl;
+  }, [receiptPreviewUrl]);
 
   useEffect(() => {
     return () => {
@@ -221,6 +224,15 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -231,6 +243,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 overflow-y-auto"
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-expense-modal-title"
             initial={{ scale: 0.95, y: 20, opacity: 0 }}
             animate={{ scale: 1, y: 0, opacity: 1 }}
             exit={{ scale: 0.95, y: 20, opacity: 0 }}
@@ -244,7 +259,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                   <Wallet className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Rejestracja Wydatku / Faktury</h3>
+                  <h3 id="add-expense-modal-title" className="text-sm font-bold text-white">Rejestracja Wydatku / Faktury</h3>
                   <p className="text-[11px] text-slate-400">
                     Rozpoznawanie paragonów (Castorama, Leroy, OBI) i kompresja do WebP
                   </p>
@@ -252,7 +267,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               </div>
               <button
                 onClick={onClose}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
+                aria-label="Zamknij okno rejestracji wydatku"
               >
                 <X className="w-4 h-4" />
               </button>

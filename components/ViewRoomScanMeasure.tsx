@@ -64,7 +64,10 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const userPhotoUrlRef = useRef<string | null>(null);
-  userPhotoUrlRef.current = userPhotoUrl;
+
+  React.useEffect(() => {
+    userPhotoUrlRef.current = userPhotoUrl;
+  }, [userPhotoUrl]);
 
   React.useEffect(() => {
     return () => {

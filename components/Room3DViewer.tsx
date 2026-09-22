@@ -475,28 +475,6 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
     });
   };
 
-  const handleQuickAddFurniture = (preset: typeof QUICK_FURNITURE_ITEMS[number]) => {
-    if (!onUpdateFurniture) return;
-    const existingCount = room.furniture?.length || 0;
-    const offsetX = (existingCount % 3) * 6;
-    const offsetY = (Math.floor(existingCount / 3) % 3) * 6;
-    const newFurn: RoomFurniture = {
-      id: `furn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      name: preset.name,
-      x: Math.min(80, Math.max(20, 50 + offsetX)),
-      y: Math.min(80, Math.max(20, 50 + offsetY)),
-      width: preset.width,
-      height: preset.height,
-      rotation: 0,
-      iconType: preset.iconType,
-      model3DUrl: preset.model3DUrl,
-      color: preset.color,
-    };
-    const updated = [...(room.furniture || []), newFurn];
-    onUpdateFurniture(room.id, updated);
-    setSelectedFurnitureId(newFurn.id);
-  };
-
   const handleSelectLightTemp = (tempK: number) => {
     if (!onUpdateRoomDesign) return;
     onUpdateRoomDesign(room.id, {
@@ -625,6 +603,10 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
   const [showDimensions3D, setShowDimensions3D] = useState(true);
   const [autoRotate, setAutoRotate] = useState(false);
   const [enableBloom, setEnableBloom] = useState(true);
+  const enableBloomRef = useRef(enableBloom);
+  useEffect(() => {
+    enableBloomRef.current = enableBloom;
+  }, [enableBloom]);
 
   const autoRotateRef = useRef(autoRotate);
   useEffect(() => {
@@ -651,6 +633,28 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
 
   // Active selected furniture item
   const selectedFurnitureItem = room.furniture?.find((f) => f.id === selectedFurnitureId) || null;
+
+  const handleQuickAddFurniture = useCallback((preset: typeof QUICK_FURNITURE_ITEMS[number]) => {
+    if (!onUpdateFurniture) return;
+    const existingCount = room.furniture?.length || 0;
+    const offsetX = (existingCount % 3) * 6;
+    const offsetY = (Math.floor(existingCount / 3) % 3) * 6;
+    const newFurn: RoomFurniture = {
+      id: `furn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: preset.name,
+      x: Math.min(80, Math.max(20, 50 + offsetX)),
+      y: Math.min(80, Math.max(20, 50 + offsetY)),
+      width: preset.width,
+      height: preset.height,
+      rotation: 0,
+      iconType: preset.iconType,
+      model3DUrl: preset.model3DUrl,
+      color: preset.color,
+    };
+    const updated = [...(room.furniture || []), newFurn];
+    onUpdateFurniture(room.id, updated);
+    setSelectedFurnitureId(newFurn.id);
+  }, [room.furniture, room.id, onUpdateFurniture]);
 
   // Setup Three.js Scene
   useEffect(() => {
@@ -986,7 +990,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       }
       controls.update();
 
-      if (enableBloom && composerRef.current && photoDisplayModeRef.current !== 'photo_overlay') {
+      if (enableBloomRef.current && composerRef.current && photoDisplayModeRef.current !== 'photo_overlay') {
         composerRef.current.render();
       } else {
         renderer.render(scene, camera);
@@ -1019,13 +1023,16 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
       if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
       }
+      composerRef.current?.dispose();
+      groundRef.current?.geometry.dispose();
+      gridHelperRef.current?.geometry.dispose();
       controls.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [enableBloom]);
+  }, []);
 
   // Effect to switch Three.js scene background/clearColor and ground visibility based on photoDisplayMode
   useEffect(() => {
@@ -3698,7 +3705,7 @@ export const Room3DViewer: React.FC<Room3DViewerProps> = ({
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
         room={room}
-        sceneObject={roomGroupRef.current}
+        getSceneObject={() => roomGroupRef.current}
       />
 
     </div>

@@ -929,7 +929,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
             {/* Magnifier Loupe (3x Zoom above dragged point) */}
             <MagnifierLoupe
-              sourceElement={isFrozen ? frozenCanvasRef.current : videoRef.current}
+              getSourceElement={() => (isFrozen ? frozenCanvasRef.current : videoRef.current)}
               point={activeLoupePoint}
               containerRect={containerRect}
               zoom={3}

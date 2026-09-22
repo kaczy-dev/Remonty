@@ -113,12 +113,22 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
       presetLabel: selectedPresetId === 'custom' ? `Własny (${customDimensionCm} cm)` : selectedPreset.label,
       referenceDimensionMeters: activeReferenceMeters,
     });
-    onClose();
-  };
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="scale-calib-modal-title"
+        className="relative w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4 bg-slate-900/90">
           <div className="flex items-center gap-2.5">
@@ -126,7 +136,7 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
               <Sliders className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-100">Kalibracja Optyczna Skali Pomiaru</h3>
+              <h3 id="scale-calib-modal-title" className="text-base font-bold text-slate-100">Kalibracja Optyczna Skali Pomiaru</h3>
               <p className="text-xs text-slate-400">
                 Dopasuj rozstaw wskaźników do znanego obiektu, by uzyskać milimetrową dokładność bez zgadywania dystansu.
               </p>
@@ -136,6 +146,7 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
             onClick={onClose}
             className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition cursor-pointer"
             title="Zamknij"
+            aria-label="Zamknij okno kalibracji skali"
           >
             <X className="w-5 h-5" />
           </button>
