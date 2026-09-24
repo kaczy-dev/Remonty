@@ -262,3 +262,46 @@ export function findNearestEdgePoint(
 
   return { snappedPoint: { ...point }, isSnapped: false, distancePixels: 0 };
 }
+
+export interface FrameLightingAnalysis {
+  averageLuminance: number; // 0..255
+  isLowLight: boolean; // true jeśli < 40/255
+  condition: 'good' | 'dim' | 'dark';
+}
+
+/**
+ * Analizuje oświetlenie klatki wideo lub zdjęcia na budowie na podstawie średniej luminancji pikseli (Y = 0.299R + 0.587G + 0.114B).
+ * Zwraca informację o słabym oświetleniu (próg < 40/255) z zaleceniem włączenia latarki / doświetlenia stoiska.
+ */
+export function analyzeFrameLighting(
+  rgbaData: Uint8ClampedArray | Uint8Array
+): FrameLightingAnalysis {
+  if (!rgbaData || rgbaData.length < 4) {
+    return { averageLuminance: 128, isLowLight: false, condition: 'good' };
+  }
+
+  let totalLuminance = 0;
+  let count = 0;
+
+  // Próbkowanie co 4. piksel (co 16 bajtów RGBA) dla ultra-szybkiej analizy bez obciążenia CPU
+  for (let i = 0; i < rgbaData.length; i += 16) {
+    const r = rgbaData[i];
+    const g = rgbaData[i + 1];
+    const b = rgbaData[i + 2];
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    totalLuminance += y;
+    count++;
+  }
+
+  const avg = count > 0 ? totalLuminance / count : 128;
+  const roundedAvg = Math.round(avg * 10) / 10;
+  const isLowLight = roundedAvg < 40;
+  const condition = roundedAvg < 20 ? 'dark' : roundedAvg < 40 ? 'dim' : 'good';
+
+  return {
+    averageLuminance: Math.round(roundedAvg),
+    isLowLight,
+    condition,
+  };
+}
+

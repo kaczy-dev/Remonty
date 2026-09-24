@@ -15,6 +15,9 @@ import {
   Moon,
   FolderKanban,
   ChevronDown,
+  Search,
+  HardHat,
+  Keyboard,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -32,6 +35,10 @@ interface HeaderProps {
   onOpenReportModal: () => void;
   onOpenProjectSwitcher?: () => void;
   unreadNotificationsCount: number;
+  onOpenCommandPalette?: () => void;
+  onOpenKeyboardShortcuts?: () => void;
+  isWakeLockActive?: boolean;
+  onToggleWakeLock?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +55,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenReportModal,
   onOpenProjectSwitcher,
   unreadNotificationsCount,
+  onOpenCommandPalette,
+  onOpenKeyboardShortcuts,
+  isWakeLockActive = false,
+  onToggleWakeLock,
 }) => {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 backdrop-blur-md">
@@ -87,6 +98,24 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Global Command Palette Search Bar */}
+          {onOpenCommandPalette && (
+            <button
+              type="button"
+              id="header-command-palette-btn"
+              onClick={onOpenCommandPalette}
+              title="Wyszukaj pokój, moduł lub akcję (Ctrl + K)"
+              className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/90 px-2.5 sm:px-3 py-1.5 text-xs text-slate-400 hover:border-teal-500/40 hover:text-slate-200 transition group shadow-xs shrink-0"
+            >
+              <Search className="w-3.5 h-3.5 text-teal-400 group-hover:scale-110 transition" />
+              <span className="hidden md:inline">Szukaj lub Ctrl+K...</span>
+              <span className="md:hidden">Szukaj...</span>
+              <kbd className="hidden lg:inline-flex items-center rounded border border-slate-700 bg-slate-800 px-1.5 py-0.2 text-[9px] font-mono text-teal-300">
+                Ctrl K
+              </kbd>
+            </button>
+          )}
 
           {/* Quick Room Selector Tabs */}
           <div className="hidden lg:flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800/80 max-w-xs xl:max-w-md overflow-x-auto no-scrollbar shrink">
@@ -171,6 +200,41 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
               )}
             </div>
+
+            {/* Job Site Mode (Screen Wake Lock) Button */}
+            {onToggleWakeLock && (
+              <button
+                id="job-site-mode-btn"
+                onClick={onToggleWakeLock}
+                title={
+                  isWakeLockActive
+                    ? 'Tryb Budowa AKTYWNY: ekran nie wygasza się podczas pracy. Kliknij, aby wyłączyć.'
+                    : 'Włącz Tryb Budowa: blokada wygaszania ekranu podczas pracy z miarką'
+                }
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition ${
+                  isWakeLockActive
+                    ? 'border-amber-500/80 bg-amber-500/20 text-amber-300 ring-2 ring-amber-500/30 shadow-xs'
+                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-amber-300 hover:bg-slate-800/80 shadow-xs'
+                }`}
+              >
+                <HardHat className={`w-4 h-4 ${isWakeLockActive ? 'text-amber-400' : 'text-slate-400'}`} />
+                <span className="hidden xl:inline text-[11px]">
+                  {isWakeLockActive ? 'Budowa ON' : 'Tryb Budowa'}
+                </span>
+              </button>
+            )}
+
+            {/* Keyboard Shortcuts (?) Button */}
+            {onOpenKeyboardShortcuts && (
+              <button
+                id="keyboard-shortcuts-btn"
+                onClick={onOpenKeyboardShortcuts}
+                title="Pokaż skróty klawiszowe (?)"
+                className="hidden md:flex items-center justify-center rounded-xl border border-slate-800 bg-slate-900 p-2 text-slate-400 hover:text-teal-300 hover:bg-slate-800 transition shadow-xs"
+              >
+                <Keyboard className="w-4 h-4" />
+              </button>
+            )}
 
             {/* Theme Switcher Toggle (Dark Mode / Light Mode) */}
             {onToggleTheme && (

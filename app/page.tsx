@@ -48,6 +48,9 @@ import { ProjectSwitcherModal } from '@/components/ProjectSwitcherModal';
 import { FloatingAIAssistant } from '@/components/FloatingAIAssistant';
 import { NotificationsDrawer } from '@/components/NotificationsDrawer';
 import { MobileBottomNav } from '@/components/MobileBottomNav';
+import { CommandPaletteModal } from '@/components/CommandPaletteModal';
+import { KeyboardShortcutsModal } from '@/components/KeyboardShortcutsModal';
+import { useWakeLock } from '@/hooks/useWakeLock';
 import { useToast } from '@/components/ToastProvider';
 import { syncProjectNotifications } from '@/lib/notification-engine';
 import {
@@ -75,6 +78,8 @@ export default function HomePage() {
   const [aiPrefilledPrompt, setAiPrefilledPrompt] = useState<string>('');
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [storageSaveFailed, setStorageSaveFailed] = useState(false);
   const [pushPermissionState, setPushPermissionState] = useState<string>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -85,6 +90,20 @@ export default function HomePage() {
 
   const { showToast } = useToast();
   const isOnline = useOnlineStatus();
+  const wakeLock = useWakeLock();
+
+  const handleToggleWakeLock = useCallback(async () => {
+    if (!wakeLock.isSupported) {
+      showToast('Twoja przeglądarka nie obsługuje blokady wygaszania ekranu (Wake Lock API).', { type: 'info' });
+      return;
+    }
+    const newActive = await wakeLock.toggle();
+    if (newActive) {
+      showToast('👷 Tryb Budowa włączony — ekran nie zgaśnie podczas pracy!', { type: 'success' });
+    } else {
+      showToast('Tryb Budowa wyłączony.', { type: 'info' });
+    }
+  }, [wakeLock, showToast]);
 
   // Update app badge and dispatch native notifications when unread items change
   React.useEffect(() => {
@@ -210,6 +229,75 @@ export default function HomePage() {
       selectedRoomId: roomId,
     });
   }, [project, updateProject]);
+
+  // Global keyboard shortcuts (1-6 stages, [ ] rooms, N new expense, B job site mode, ? shortcuts, Ctrl+K command palette)
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+
+      // Ctrl+K or Cmd+K: toggle command palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      if (isInput) return;
+
+      if (e.key === '?') {
+        e.preventDefault();
+        setIsShortcutsModalOpen((prev) => !prev);
+        return;
+      }
+
+      if (e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        handleToggleWakeLock();
+        return;
+      }
+
+      if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setIsExpenseModalOpen(true);
+        return;
+      }
+
+      const stageMap: Record<string, RenovationPipelineStep> = {
+        '1': 'measure',
+        '2': 'design',
+        '3': 'cost',
+        '4': 'plan',
+        '5': 'progress',
+        '6': 'qa',
+      };
+      if (stageMap[e.key]) {
+        e.preventDefault();
+        setActivePipelineStep(stageMap[e.key]);
+        return;
+      }
+
+      if (e.key === '[' || e.key === ']') {
+        e.preventDefault();
+        if (!project.rooms || project.rooms.length === 0) return;
+        const currentIndex = project.rooms.findIndex((r) => r.id === project.selectedRoomId);
+        if (currentIndex === -1) return;
+        const nextIndex =
+          e.key === ']'
+            ? (currentIndex + 1) % project.rooms.length
+            : (currentIndex - 1 + project.rooms.length) % project.rooms.length;
+        handleSelectRoom(project.rooms[nextIndex].id);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSelectRoom, handleToggleWakeLock, project.rooms, project.selectedRoomId]);
 
   // Update room dimensions & shape
   const handleUpdateRoomDimensions = useCallback((
@@ -791,6 +879,10 @@ export default function HomePage() {
         onOpenAddRoomModal={() => setIsAddRoomModalOpen(true)}
         onOpenReportModal={() => setIsReportModalOpen(true)}
         onOpenProjectSwitcher={() => setIsProjectSwitcherOpen(true)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenKeyboardShortcuts={() => setIsShortcutsModalOpen(true)}
+        isWakeLockActive={wakeLock.isActive}
+        onToggleWakeLock={handleToggleWakeLock}
         unreadNotificationsCount={project.notifications.filter((n) => !n.read).length}
       />
 
@@ -801,7 +893,7 @@ export default function HomePage() {
       />
 
       {/* Core Dynamic Content Area with Step Transitions */}
-      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-8 space-y-6">
+      <main className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] sm:pb-8 space-y-6">
         {/* Visual Renovation Progress Indicator Banner on Main Screen */}
         {activePipelineStep !== 'progress' && (
           <ProjectProgressIndicator
@@ -936,12 +1028,50 @@ export default function HomePage() {
         pushPermissionState={pushPermissionState}
       />
 
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        project={project}
+        activePipelineStep={activePipelineStep}
+        theme={theme}
+        isWakeLockActive={wakeLock.isActive}
+        onSelectPipelineStep={(step) => setActivePipelineStep(step)}
+        onSelectRoom={handleSelectRoom}
+        onOpenAddExpense={() => setIsExpenseModalOpen(true)}
+        onOpenAddRoomModal={() => setIsAddRoomModalOpen(true)}
+        onOpenReportModal={() => setIsReportModalOpen(true)}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenAIModal={() => setIsAIModalOpen(true)}
+        onOpenProjectSwitcher={() => setIsProjectSwitcherOpen(true)}
+        onOpenKeyboardShortcuts={() => setIsShortcutsModalOpen(true)}
+        onToggleWakeLock={handleToggleWakeLock}
+        onToggleTheme={handleToggleTheme}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
       {/* Mobile Bottom Navigation Bar (Thumb zone) */}
       <MobileBottomNav
         activeStep={activePipelineStep}
         onSelectStep={(step) => setActivePipelineStep(step)}
         onOpenQuickExpense={() => setIsExpenseModalOpen(true)}
         onOpenReportModal={() => setIsReportModalOpen(true)}
+        onOpenAIModal={() => setIsAIModalOpen(true)}
+        onToggleWakeLock={handleToggleWakeLock}
+        isWakeLockActive={wakeLock.isActive}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenProjectSwitcher={() => setIsProjectSwitcherOpen(true)}
+        onToggleTheme={handleToggleTheme}
+        theme={theme}
+        onOpenScanner={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            document.getElementById('tab-camera-grid-btn')?.click();
+          }, 120);
+        }}
       />
 
     </div>

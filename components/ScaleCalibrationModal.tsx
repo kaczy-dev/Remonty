@@ -17,9 +17,12 @@ import {
   ChevronRight,
   AlertCircle,
   HelpCircle,
+  Wrench,
+  Layers,
 } from 'lucide-react';
 import {
   CALIBRATION_PRESETS,
+  CalibrationPreset,
   CalibrationPresetId,
   Point2D,
   calculateCalibratedScale,
@@ -40,6 +43,7 @@ interface ScaleCalibrationModalProps {
   onApplyCalibration: (calib: AppliedCalibration) => void;
   currentEstimatedDistance: number;
   currentFovAngle?: number;
+  currentAspectRatio?: number;
 }
 
 export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
@@ -48,9 +52,13 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
   onApplyCalibration,
   currentEstimatedDistance,
   currentFovAngle = 68,
+  currentAspectRatio = 16 / 9,
 }) => {
   const [selectedPresetId, setSelectedPresetId] = useState<CalibrationPresetId>('card_iso_width');
   const [customDimensionCm, setCustomDimensionCm] = useState<number>(100);
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<
+    'all' | 'tool' | 'board_tile' | 'door' | 'card_paper'
+  >('all');
 
   // Calibration points on interactive preview canvas (percentages 0..100)
   const [pointC1, setPointC1] = useState<Point2D>({ x: 35, y: 50 });
@@ -72,8 +80,54 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
 
   // Live scale calculation
   const calibrationResult: CalibrationResult = useMemo(() => {
-    return calculateCalibratedScale(pointC1, pointC2, activeReferenceMeters, 16 / 9, currentFovAngle);
-  }, [pointC1, pointC2, activeReferenceMeters, currentFovAngle]);
+    return calculateCalibratedScale(pointC1, pointC2, activeReferenceMeters, currentAspectRatio, currentFovAngle);
+  }, [pointC1, pointC2, activeReferenceMeters, currentAspectRatio, currentFovAngle]);
+
+  const handleSelectPreset = (preset: CalibrationPreset) => {
+    setSelectedPresetId(preset.id);
+    if (preset.id === 'custom') return;
+    if (preset.orientation === 'vertical') {
+      setPointC1({ x: 50, y: 20 });
+      setPointC2({ x: 50, y: 80 });
+    } else if (preset.category === 'card') {
+      setPointC1({ x: 40, y: 50 });
+      setPointC2({ x: 60, y: 50 });
+    } else if (preset.sizeMeters >= 1.0) {
+      setPointC1({ x: 15, y: 50 });
+      setPointC2({ x: 85, y: 50 });
+    } else {
+      setPointC1({ x: 25, y: 50 });
+      setPointC2({ x: 75, y: 50 });
+    }
+  };
+
+  const filteredPresets = useMemo(() => {
+    if (activeCategoryFilter === 'all') return CALIBRATION_PRESETS;
+    if (activeCategoryFilter === 'tool') {
+      return CALIBRATION_PRESETS.filter((p) => p.category === 'tool');
+    }
+    if (activeCategoryFilter === 'board_tile') {
+      return CALIBRATION_PRESETS.filter((p) => p.category === 'tile' || p.category === 'board');
+    }
+    if (activeCategoryFilter === 'door') {
+      return CALIBRATION_PRESETS.filter((p) => p.category === 'door');
+    }
+    if (activeCategoryFilter === 'card_paper') {
+      return CALIBRATION_PRESETS.filter((p) => p.category === 'card' || p.category === 'paper');
+    }
+    return CALIBRATION_PRESETS;
+  }, [activeCategoryFilter]);
+
+  const getPresetIcon = (preset: CalibrationPreset) => {
+    if (preset.id.startsWith('level_')) return Wrench;
+    if (preset.id === 'drywall_120') return Layers;
+    if (preset.category === 'tile') return Grid;
+    if (preset.category === 'door') return DoorClosed;
+    if (preset.category === 'card') return CreditCard;
+    if (preset.category === 'paper') return FileText;
+    if (preset.category === 'custom') return Sliders;
+    return Ruler;
+  };
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -159,126 +213,98 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-5">
           {/* Step 1: Preset Selection */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <span>1. Wybierz obiekt referencyjny w kadrze</span>
-            </label>
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <span>1. Wybierz obiekt referencyjny w kadrze</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryFilter('all')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition cursor-pointer ${
+                    activeCategoryFilter === 'all'
+                      ? 'bg-teal-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Wszystkie ({CALIBRATION_PRESETS.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryFilter('tool')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                    activeCategoryFilter === 'tool'
+                      ? 'bg-teal-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Wrench className="w-3 h-3" />
+                  <span>Poziomice</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryFilter('board_tile')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                    activeCategoryFilter === 'board_tile'
+                      ? 'bg-teal-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Grid className="w-3 h-3" />
+                  <span>Płyty/Gres</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryFilter('door')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                    activeCategoryFilter === 'door'
+                      ? 'bg-teal-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <DoorClosed className="w-3 h-3" />
+                  <span>Drzwi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryFilter('card_paper')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                    activeCategoryFilter === 'card_paper'
+                      ? 'bg-teal-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <CreditCard className="w-3 h-3" />
+                  <span>Karta/A4</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Presets Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId('card_iso_width');
-                  setPointC1({ x: 40, y: 50 });
-                  setPointC2({ x: 60, y: 50 });
-                }}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'card_iso_width'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <CreditCard className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Karta Płatnicza</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">Szer. 85.6 mm</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId('a4_length');
-                  setPointC1({ x: 30, y: 50 });
-                  setPointC2({ x: 70, y: 50 });
-                }}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'a4_length'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <FileText className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Kartka A4</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">Dług. 297 mm</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId('tile_60');
-                  setPointC1({ x: 25, y: 50 });
-                  setPointC2({ x: 75, y: 50 });
-                }}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'tile_60'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <Grid className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Płytka 60×60</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">Bok 60.0 cm</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId('door_width');
-                  setPointC1({ x: 20, y: 50 });
-                  setPointC2({ x: 80, y: 50 });
-                }}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'door_width'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <DoorClosed className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Drzwi Standard</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">Szer. 80.0 cm</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId('door_height');
-                  setPointC1({ x: 50, y: 20 });
-                  setPointC2({ x: 50, y: 80 });
-                }}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'door_height'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <Ruler className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Wysokość Drzwi</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">Wys. 205 cm</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedPresetId('custom')}
-                className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  selectedPresetId === 'custom'
-                    ? 'border-teal-500 bg-teal-950/40 text-teal-200'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <Sliders className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Własny Wymiar</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 mt-1">{customDimensionCm} cm</span>
-              </button>
+              {filteredPresets.map((preset) => {
+                const isSelected = selectedPresetId === preset.id;
+                const IconComp = getPresetIcon(preset);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                      isSelected
+                        ? 'border-teal-500 bg-teal-950/40 text-teal-200 ring-1 ring-teal-500/50 shadow-xs'
+                        : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs truncate w-full">
+                      <IconComp className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-teal-400' : 'text-slate-400'}`} />
+                      <span className="truncate">{preset.label}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 mt-1">{preset.sublabel}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Custom Dimension Input */}
@@ -308,6 +334,13 @@ export const ScaleCalibrationModal: React.FC<ScaleCalibrationModalProps> = ({
                     className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono cursor-pointer"
                   >
                     100cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomDimensionCm(120)}
+                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono cursor-pointer"
+                  >
+                    120cm
                   </button>
                   <button
                     type="button"

@@ -27,6 +27,9 @@ import {
   CreditCard,
   Target,
   Zap,
+  Upload,
+  Activity,
+  SunMedium,
 } from 'lucide-react';
 import { MagnifierLoupe } from './MagnifierLoupe';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
@@ -36,6 +39,8 @@ import {
   detectEdgesCanny,
   findNearestEdgePoint,
   EdgeDetectionResult,
+  analyzeFrameLighting,
+  FrameLightingAnalysis,
 } from '@/lib/cv/canny-edge-detector';
 import { validatePolygonGeometry } from '@/lib/cv/polygon-validator';
 
@@ -68,6 +73,10 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestIdRef = useRef(0);
 
+  // Hidden File Inputs for Native Camera and Gallery Fallbacks
+  const cameraCaptureInputRef = useRef<HTMLInputElement>(null);
+  const galleryFileInputRef = useRef<HTMLInputElement>(null);
+
   // Camera & Stream states
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -75,10 +84,32 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   // Freeze Frame (Still photo capture mode for jitter-free measurement on ladder)
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
+  const [photoSourceInfo, setPhotoSourceInfo] = useState<{
+    name: string;
+    width: number;
+    height: number;
+    isSystemCamera?: boolean;
+  } | null>(null);
+
+  // Optical Aspect Ratio (16:9 for default WebRTC, adapts dynamically to uploaded / captured photo)
+  const [currentAspectRatio, setCurrentAspectRatio] = useState<number>(16 / 9);
 
   // Hardware Torch state
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
   const [isTorchSupported, setIsTorchSupported] = useState<boolean>(false);
+
+  // Live Construction Site Lighting Analysis
+  const [lightingInfo, setLightingInfo] = useState<FrameLightingAnalysis>({
+    averageLuminance: 120,
+    isLowLight: false,
+    condition: 'good',
+  });
+
+  // Diagnostic Info overlay toggle
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+
+  // Dimension applied confirmation feedback
+  const [appliedFeedback, setAppliedFeedback] = useState<string | null>(null);
 
   // Container dimensions for responsive Magnifier Loupe positioning
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
@@ -142,8 +173,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   // Width of visible frame at distance D: W_visible = 2 * D * tan(FOV/2)
   const visibleFrameWidthMeters = 2 * estimatedDistanceMeters * Math.tan((calibratedFovAngle * Math.PI) / 360);
-  const aspect = 16 / 9;
-  const visibleFrameHeightMeters = visibleFrameWidthMeters / aspect;
+  const visibleFrameHeightMeters = visibleFrameWidthMeters / currentAspectRatio;
 
   const runEdgeDetection = useCallback(() => {
     const source = isFrozen ? frozenCanvasRef.current : videoRef.current;
@@ -153,7 +183,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       setIsProcessingEdges(true);
       const offscreen = document.createElement('canvas');
       const w = 320;
-      const h = 180;
+      const h = Math.max(1, Math.round(320 / currentAspectRatio));
       offscreen.width = w;
       offscreen.height = h;
       const ctx = offscreen.getContext('2d');
@@ -171,7 +201,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       console.warn('Edge detection error:', err);
       setIsProcessingEdges(false);
     }
-  }, [isFrozen]);
+  }, [isFrozen, currentAspectRatio]);
 
   const handleApplyCalibration = useCallback((calib: AppliedCalibration) => {
     setEstimatedDistanceMeters(calib.estimatedDistanceMeters);
@@ -192,6 +222,116 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     window.addEventListener('resize', updateContainerRect);
     return () => window.removeEventListener('resize', updateContainerRect);
   }, [updateContainerRect]);
+
+  // Reliable Fallback: Load photo from gallery or system camera capture
+  const loadImageFromFile = useCallback(
+    (file: File, isSystemCamera: boolean = false) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (!dataUrl) return;
+
+        const img = new Image();
+        img.onload = () => {
+          const canvas = frozenCanvasRef.current;
+          if (!canvas) return;
+
+          canvas.width = img.naturalWidth || img.width || 1280;
+          canvas.height = img.naturalHeight || img.height || 720;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const photoAspect = canvas.width / canvas.height;
+          setCurrentAspectRatio(photoAspect);
+          setIsFrozen(true);
+          setIsStreaming(false);
+          setCameraError(null);
+          setPhotoSourceInfo({
+            name: file.name || (isSystemCamera ? 'Zdjęcie z aparatu' : 'Zdjęcie z galerii'),
+            width: canvas.width,
+            height: canvas.height,
+            isSystemCamera,
+          });
+
+          // Stop active camera stream tracks to conserve battery on site
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+          }
+
+          // Lighting analysis of loaded photo
+          try {
+            const sW = 160;
+            const sH = Math.max(1, Math.round(160 / photoAspect));
+            const sampleCanvas = document.createElement('canvas');
+            sampleCanvas.width = sW;
+            sampleCanvas.height = sH;
+            const sCtx = sampleCanvas.getContext('2d');
+            if (sCtx) {
+              sCtx.drawImage(canvas, 0, 0, sW, sH);
+              const sImg = sCtx.getImageData(0, 0, sW, sH);
+              const light = analyzeFrameLighting(sImg.data);
+              setLightingInfo(light);
+            }
+          } catch (e) {
+            console.warn('Lighting analysis error:', e);
+          }
+
+          if (enableAiEdgeAssist) {
+            setTimeout(() => runEdgeDetection(), 60);
+          }
+
+          updateContainerRect();
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    },
+    [enableAiEdgeAssist, runEdgeDetection, updateContainerRect]
+  );
+
+  const handleSystemCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadImageFromFile(file, true);
+    }
+    e.target.value = '';
+  };
+
+  const handleGalleryFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadImageFromFile(file, false);
+    }
+    e.target.value = '';
+  };
+
+  // Live Construction Site Lighting Analysis (Periodic check while streaming)
+  useEffect(() => {
+    if (!isStreaming || isFrozen) return;
+
+    const intervalId = setInterval(() => {
+      if (!videoRef.current || videoRef.current.readyState < 2) return;
+      try {
+        const v = videoRef.current;
+        const offscreen = document.createElement('canvas');
+        offscreen.width = 64;
+        offscreen.height = Math.max(1, Math.round(64 / currentAspectRatio));
+        const ctx = offscreen.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(v, 0, 0, offscreen.width, offscreen.height);
+        const imgData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+        const light = analyzeFrameLighting(imgData.data);
+        setLightingInfo(light);
+      } catch {
+        // ignore
+      }
+    }, 1200);
+
+    return () => clearInterval(intervalId);
+  }, [isStreaming, isFrozen, currentAspectRatio]);
 
   // Record laser state for Undo
   const pushLaserHistory = useCallback(() => {
@@ -341,6 +481,12 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             videoRef.current?.play().catch(() => {});
             setIsStreaming(true);
             setIsFrozen(false);
+            setPhotoSourceInfo(null);
+            if (videoRef.current && videoRef.current.videoWidth && videoRef.current.videoHeight) {
+              setCurrentAspectRatio(videoRef.current.videoWidth / videoRef.current.videoHeight);
+            } else {
+              setCurrentAspectRatio(16 / 9);
+            }
             if (resolvedMode !== mode) setFacingMode(resolvedMode);
             updateContainerRect();
           }
@@ -378,7 +524,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       if (requestId !== cameraRequestIdRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Brak dostępu do kamery';
       setCameraError(
-        `Nie udało się uruchomić kamery (${errorMessage}). Upewnij się, że przyznano uprawnienia do aparatu.`
+        `Nie udało się uruchomić kamery (${errorMessage}). Upewnij się, że przyznano uprawnienia do aparatu lub skorzystaj z opcji zrobienia zdjęcia.`
       );
       setIsStreaming(false);
     }
@@ -409,7 +555,11 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   // Freeze / Unfreeze Frame for jitter-free measurement on ladder
   const handleToggleFreeze = () => {
     if (isFrozen) {
-      setIsFrozen(false);
+      if (photoSourceInfo) {
+        startCamera();
+      } else {
+        setIsFrozen(false);
+      }
     } else {
       if (videoRef.current && frozenCanvasRef.current) {
         const v = videoRef.current;
@@ -420,6 +570,9 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
         if (ctx) {
           ctx.drawImage(v, 0, 0, c.width, c.height);
           setIsFrozen(true);
+          if (c.width && c.height) {
+            setCurrentAspectRatio(c.width / c.height);
+          }
           if (enableAiEdgeAssist) {
             setTimeout(() => runEdgeDetection(), 60);
           }
@@ -620,6 +773,12 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   // Apply to Room Geometry
   const handleApplyToRoom = () => {
     if (!onApplyMeasuredDimensions) return;
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([30, 40, 30]);
+      } catch {}
+    }
+
     if (scannerToolMode === 'polygon_trace') {
       if (polygonPoints.length < 3 || !polygonValidation.isValid) return;
       const metricVertices = polygonPoints.map((p) => ({
@@ -640,6 +799,8 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       }));
 
       onApplyMeasuredDimensions(boundingW, boundingL, roomHeight, normalizedPoly);
+      setAppliedFeedback(`Zastosowano obrys posadzki: ${polygonMetrics.areaM2.toFixed(2)} m²`);
+      setTimeout(() => setAppliedFeedback(null), 2500);
       return;
     }
 
@@ -648,11 +809,15 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
     if (activeMeasureMode === 'wall_width') {
       onApplyMeasuredDimensions(roundedM, roomLength, roomHeight);
+      setAppliedFeedback(`Zastosowano szerokość: ${roundedM.toFixed(2)} m`);
     } else if (activeMeasureMode === 'wall_height') {
       onApplyMeasuredDimensions(roomWidth, roomLength, roundedM);
+      setAppliedFeedback(`Zastosowano wysokość: ${roundedM.toFixed(2)} m`);
     } else {
       onApplyMeasuredDimensions(roomWidth, roundedM, roomHeight);
+      setAppliedFeedback(`Zastosowano długość: ${roundedM.toFixed(2)} m`);
     }
+    setTimeout(() => setAppliedFeedback(null), 2500);
   };
 
   // Determine which point the loupe should magnify right now
@@ -676,6 +841,25 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
   return (
     <div className={`space-y-4 ${className}`}>
+      {/* Hidden File Inputs for System Camera & Photo Gallery Fallbacks */}
+      <input
+        ref={cameraCaptureInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        aria-label="Zrób zdjęcie aparatem systemowym"
+        onChange={handleSystemCameraCapture}
+      />
+      <input
+        ref={galleryFileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        aria-label="Wybierz zdjęcie z galerii"
+        onChange={handleGalleryFileSelect}
+      />
+
       {/* Top Header & Quick Control Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900 border border-slate-800 p-4">
         <div className="flex items-center gap-3">
@@ -691,7 +875,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Pomiary na żywo lub na stopklatce z lupą dotykową i wskaźnikiem poziomu
+              Pomiary na żywo, na stopklatce lub ze zdjęcia aparatu z lupą dotykową
             </p>
           </div>
         </div>
@@ -723,6 +907,42 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               <span>Obrys Posadzki</span>
             </button>
           </div>
+
+          {/* Quick System Camera Capture Button (Sharp Native Photo Fallback) */}
+          <button
+            type="button"
+            onClick={() => cameraCaptureInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-xl border border-teal-500/40 bg-teal-950/40 px-3 py-1.5 text-xs font-semibold text-teal-200 hover:bg-teal-900/50 transition cursor-pointer shadow-xs"
+            title="Zrób ostre zdjęcie aparatem systemowym (z autofokusem, lampą i HDR)"
+          >
+            <Camera className="w-3.5 h-3.5 text-teal-400" />
+            <span>Aparat Foto</span>
+          </button>
+
+          {/* Upload Photo from Storage / Gallery */}
+          <button
+            type="button"
+            onClick={() => galleryFileInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 transition cursor-pointer"
+            title="Wczytaj zdjęcie z galerii urządzenia lub dysku"
+          >
+            <Upload className="w-3.5 h-3.5 text-slate-400" />
+            <span>Wgraj</span>
+          </button>
+
+          {/* Diagnostics Info Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics((prev) => !prev)}
+            className={`p-2 rounded-xl border transition cursor-pointer ${
+              showDiagnostics
+                ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Informacje diagnostyczne (rozdzielczość, FPS, światło, kąt)"
+          >
+            <Activity className="w-3.5 h-3.5" />
+          </button>
 
           {/* AI Computer Vision Edge Snapping Toggle */}
           <button
@@ -768,7 +988,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                   ? 'bg-sky-500/20 border-sky-400 text-sky-200'
                   : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
               }`}
-              title={isFrozen ? 'Wznów podgląd na żywo z kamery' : 'Zamroź kadr do spokojnego pomiaru'}
+              title={isFrozen ? 'Wznów podgląd na żywo z kamery' : 'Zamroź kadr do spokojnego pomiaru na drabinie'}
             >
               {isFrozen ? (
                 <>
@@ -839,7 +1059,8 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
         <div className="lg:col-span-8 flex flex-col space-y-3">
           <div
             ref={containerRef}
-            className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 shadow-2xl select-none cursor-crosshair group touch-none"
+            style={{ aspectRatio: `${currentAspectRatio}`, maxHeight: '72vh' }}
+            className="relative w-full rounded-2xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 shadow-2xl select-none cursor-crosshair group touch-none mx-auto"
             onPointerDown={handleContainerPointerDown}
             onPointerMove={handleContainerPointerMove}
             onPointerUp={handleContainerPointerUp}
@@ -858,32 +1079,54 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             {/* Frozen Canvas for Still Measurement without camera jitter */}
             <canvas
               ref={frozenCanvasRef}
-              className={`w-full h-full object-cover ${isFrozen ? 'block' : 'hidden'}`}
+              className={`w-full h-full object-contain ${isFrozen ? 'block' : 'hidden'}`}
             />
 
-            {/* Offline / Placeholder Screen if Camera Not Streaming */}
+            {/* Offline / Placeholder Screen if Camera Not Streaming and Not Frozen */}
             {!isStreaming && !isFrozen && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/90 backdrop-blur-xs space-y-3">
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 backdrop-blur-xs space-y-4">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/30">
                   <Camera className="h-8 w-8 animate-pulse" />
                 </div>
                 <div className="max-w-md space-y-1">
-                  <h4 className="text-sm font-bold text-slate-200">Kamera jest wyłączona</h4>
+                  <h4 className="text-base font-bold text-slate-100">Kamera jest wyłączona lub niedostępna</h4>
                   <p className="text-xs text-slate-400">
-                    Uruchom podgląd na żywo, aby dokonać precyzyjnych pomiarów laserowych lub obrysu posadzki.
+                    Uruchom podgląd na żywo, zrób ostre zdjęcie systemowym aparatem telefonu lub wgraj gotowe zdjęcie z budowy.
                   </p>
                 </div>
                 {cameraError && (
-                  <div className="flex items-center gap-2 rounded-xl bg-amber-950/50 border border-amber-800/80 p-3 text-xs text-amber-300 max-w-md text-left">
+                  <div className="flex items-center gap-2 rounded-xl bg-amber-950/60 border border-amber-800/80 p-3 text-xs text-amber-300 max-w-md text-left">
                     <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
                     <span>{cameraError}</span>
                   </div>
                 )}
+                {/* Fallback Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full max-w-md">
+                  <button
+                    type="button"
+                    onClick={() => cameraCaptureInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-teal-500 transition cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Zrób zdjęcie aparatem</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => galleryFileInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2.5 text-xs font-bold text-slate-200 transition cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4 text-teal-400" />
+                    <span>Wgraj z galerii / pliku</span>
+                  </button>
+                </div>
+
                 <button
+                  type="button"
                   onClick={() => startCamera()}
-                  className="rounded-xl bg-teal-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:bg-teal-500 transition cursor-pointer"
+                  className="text-xs text-teal-400 hover:text-teal-300 underline font-medium pt-1 cursor-pointer"
                 >
-                  Uruchom Kamerę Urządzenia
+                  Spróbuj ponownie włączyć kamerę na żywo
                 </button>
               </div>
             )}
@@ -919,11 +1162,93 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               </div>
             )}
 
+            {/* Low Light Warning Badge */}
+            {lightingInfo.isLowLight && (
+              <div className="absolute top-12 left-3 z-30 flex items-center gap-2 rounded-xl bg-amber-950/90 border border-amber-500/50 px-3 py-1.5 text-xs text-amber-200 backdrop-blur-md shadow-lg animate-fadeIn">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="flex items-center gap-1.5">
+                  <span>Słabe oświetlenie na budowie ({lightingInfo.averageLuminance}/255)</span>
+                  {isTorchSupported && isStreaming && !isFrozen && (
+                    <button
+                      type="button"
+                      onClick={handleToggleTorch}
+                      className="ml-1 px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-[10px] hover:bg-amber-400 transition cursor-pointer flex items-center gap-1 shadow-xs"
+                    >
+                      <Flashlight className="w-3 h-3" />
+                      <span>{isTorchOn ? 'Wyłącz latarkę' : 'Włącz latarkę'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Freeze Badge */}
             {isFrozen && (
-              <div className="absolute top-3 right-3 z-30 flex items-center gap-1.5 rounded-xl bg-sky-950/90 border border-sky-400/50 px-3 py-1.5 text-xs text-sky-200 backdrop-blur-md shadow-lg font-semibold">
+              <div className="absolute top-3 right-3 z-30 flex items-center gap-2 rounded-xl bg-sky-950/90 border border-sky-400/50 px-3 py-1.5 text-xs text-sky-200 backdrop-blur-md shadow-lg font-semibold">
                 <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                <span>Kadr zamrożony (Tryb precyzyjny)</span>
+                <span>
+                  {photoSourceInfo
+                    ? `Zdjęcie: ${photoSourceInfo.name} (${photoSourceInfo.width}×${photoSourceInfo.height})`
+                    : 'Kadr zamrożony (Tryb precyzyjny)'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => startCamera()}
+                  className="ml-1 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-white text-[10px] font-bold transition cursor-pointer"
+                  title="Wróć do podglądu z kamery na żywo"
+                >
+                  Kamera na żywo
+                </button>
+              </div>
+            )}
+
+            {/* Diagnostics HUD Overlay */}
+            {showDiagnostics && (
+              <div className="absolute top-12 right-3 z-30 rounded-xl bg-slate-950/90 border border-slate-700/80 p-3 text-[11px] font-mono text-slate-300 backdrop-blur-md shadow-xl space-y-1 min-w-[210px]">
+                <div className="text-xs font-bold text-teal-400 border-b border-slate-800 pb-1 flex items-center justify-between">
+                  <span>Diagnostyka Skanera</span>
+                  <span className="text-[10px] text-slate-500 font-normal">v1.2</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Rozdzielczość:</span>
+                  <span className="text-slate-200">
+                    {isFrozen && frozenCanvasRef.current
+                      ? `${frozenCanvasRef.current.width}×${frozenCanvasRef.current.height}`
+                      : videoRef.current?.videoWidth
+                      ? `${videoRef.current.videoWidth}×${videoRef.current.videoHeight}`
+                      : '1920×1080'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Klatki (FPS):</span>
+                  <span className={isFrozen ? 'text-sky-300 font-bold' : 'text-emerald-400'}>
+                    {isFrozen ? 'Stopklatka' : 'Wideo 30 FPS'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Oświetlenie:</span>
+                  <span className={lightingInfo.isLowLight ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
+                    {lightingInfo.averageLuminance}/255 ({lightingInfo.condition === 'good' ? 'Dobre' : 'Słabe'})
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Dystans kalibr.:</span>
+                  <span className="text-teal-300">{estimatedDistanceMeters.toFixed(2)} m</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Pochylenie (Pitch):</span>
+                  <span className="text-slate-200">
+                    {orientation.pitch !== null ? `${orientation.pitch.toFixed(1)}°` : '0.0°'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Applied Dimension Feedback Toast */}
+            {appliedFeedback && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 flex items-center gap-2 rounded-2xl bg-emerald-950/95 border-2 border-emerald-400 px-5 py-3 text-sm font-bold text-emerald-200 shadow-2xl backdrop-blur-md animate-in zoom-in-95">
+                <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span>{appliedFeedback}</span>
               </div>
             )}
 
@@ -948,7 +1273,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                 <pattern
                   id="metric-grid"
                   width={`${gridDensity}%`}
-                  height={`${gridDensity * (16 / 9)}%`}
+                  height={`${gridDensity * currentAspectRatio}%`}
                   patternUnits="userSpaceOnUse"
                 >
                   <line x1="0" y1="0" x2="100%" y2="0" stroke={gridColor} strokeWidth="0.25" strokeOpacity={gridOpacity} />
@@ -1433,6 +1758,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             onApplyCalibration={handleApplyCalibration}
             currentEstimatedDistance={estimatedDistanceMeters}
             currentFovAngle={calibratedFovAngle}
+            currentAspectRatio={currentAspectRatio}
           />
         </div>
       </div>

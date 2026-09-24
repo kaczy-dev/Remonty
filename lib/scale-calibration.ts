@@ -6,33 +6,123 @@
  */
 
 export type CalibrationPresetId =
+  | 'level_60'
+  | 'level_100'
+  | 'level_120'
+  | 'drywall_120'
+  | 'tile_60'
+  | 'tile_120_60'
+  | 'tile_30'
+  | 'door_width'
+  | 'door_height'
   | 'card_iso_width'
   | 'card_iso_height'
   | 'a4_length'
   | 'a4_width'
-  | 'tile_30'
-  | 'tile_60'
-  | 'door_width'
-  | 'door_height'
   | 'custom';
+
+export type CalibrationCategory = 'tool' | 'board' | 'tile' | 'door' | 'card' | 'paper' | 'custom';
 
 export interface CalibrationPreset {
   id: CalibrationPresetId;
   label: string;
   sublabel: string;
   sizeMeters: number;
-  category: 'card' | 'paper' | 'tile' | 'door' | 'custom';
+  category: CalibrationCategory;
   description: string;
+  orientation?: 'horizontal' | 'vertical';
 }
 
 export const CALIBRATION_PRESETS: CalibrationPreset[] = [
+  {
+    id: 'level_100',
+    label: 'Poziomica budowlana 100 cm',
+    sublabel: '1.00 m (1 metr bieżący)',
+    sizeMeters: 1.0,
+    category: 'tool',
+    description: 'Klasyczna poziomica lub łata murarska metrowa – podstawowy wzorzec na budowie.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'level_60',
+    label: 'Poziomica budowlana 60 cm',
+    sublabel: '0.60 m (poziomica 60 cm)',
+    sizeMeters: 0.6,
+    category: 'tool',
+    description: 'Kompaktowa poziomica glazurnicza / instalatorska 60 cm.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'level_120',
+    label: 'Poziomica budowlana 120 cm',
+    sublabel: '1.20 m (długa poziomica)',
+    sizeMeters: 1.2,
+    category: 'tool',
+    description: 'Długa poziomica aluminiowa 120 cm do precyzyjnych prac wykończeniowych.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'drywall_120',
+    label: 'Płyta G-K (Szerokość)',
+    sublabel: '1.20 m (standard 1200 mm)',
+    sizeMeters: 1.2,
+    category: 'board',
+    description: 'Fabryczna szerokość standardowej płyty gipsowo-kartonowej (120 cm).',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'tile_60',
+    label: 'Płytka / Gres 60×60 cm',
+    sublabel: '0.60 m (krawędź płytki)',
+    sizeMeters: 0.6,
+    category: 'tile',
+    description: 'Popularny format płytki gresowej podłogowej lub ściennej 60×60 cm.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'tile_120_60',
+    label: 'Płytka / Gres 120×60 cm (Dłuższy bok)',
+    sublabel: '1.20 m (dłuższy bok gresu)',
+    sizeMeters: 1.2,
+    category: 'tile',
+    description: 'Wielkoformatowy gres 120×60 cm – pomiar wzdłuż dłuższego boku.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'tile_30',
+    label: 'Płytka ceramiczna 30×30 cm',
+    sublabel: '0.30 m (krawędź płytki)',
+    sizeMeters: 0.3,
+    category: 'tile',
+    description: 'Standardowa płytka łazienkowa / kuchenna 30 cm.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'door_width',
+    label: 'Skrzydło / Ościeżnica (Szerokość)',
+    sublabel: '0.80 m (norma budowlana "80")',
+    sizeMeters: 0.8,
+    category: 'door',
+    description: 'Typowa szerokość skrzydła drzwi wewnętrznych w świetle ościeżnicy.',
+    orientation: 'horizontal',
+  },
+  {
+    id: 'door_height',
+    label: 'Otwór drzwiowy / Skrzydło (Wysokość)',
+    sublabel: '2.05 m (standard ościeżnicy)',
+    sizeMeters: 2.05,
+    category: 'door',
+    description: 'Standardowa wysokość skrzydła lub otworu drzwiowego.',
+    orientation: 'vertical',
+  },
   {
     id: 'card_iso_width',
     label: 'Karta Płatnicza / Dowód (Szerokość)',
     sublabel: '85.60 mm (ISO/IEC 7810 ID-1)',
     sizeMeters: 0.0856,
     category: 'card',
-    description: 'Najpopularniejszy wzorzec w kieszeni (karta bankowa, prawo jazdy, dowód osobisty).',
+    description: 'Wzorzec kieszonkowy (karta bankowa, prawo jazdy, dowód osobisty).',
+    orientation: 'horizontal',
   },
   {
     id: 'card_iso_height',
@@ -41,62 +131,34 @@ export const CALIBRATION_PRESETS: CalibrationPreset[] = [
     sizeMeters: 0.05398,
     category: 'card',
     description: 'Krótsza krawędź karty bankowej.',
+    orientation: 'vertical',
   },
   {
     id: 'a4_length',
-    label: 'Kartka A4 (Dłuższy bok)',
-    sublabel: '297.0 mm (standard ISO 216)',
+    label: 'Arkusz A4 (Dłuższy bok)',
+    sublabel: '29.7 cm (297 mm, standard ISO 216)',
     sizeMeters: 0.297,
     category: 'paper',
-    description: 'Standardowa kartka papieru biurowego A4 położona na posadzce lub przy ścianie.',
+    description: 'Standardowa kartka papieru biurowego A4 przyłożona do płaszczyzny.',
+    orientation: 'horizontal',
   },
   {
     id: 'a4_width',
-    label: 'Kartka A4 (Krótszy bok)',
-    sublabel: '210.0 mm (standard ISO 216)',
+    label: 'Arkusz A4 (Krótszy bok)',
+    sublabel: '21.0 cm (210 mm, standard ISO 216)',
     sizeMeters: 0.21,
     category: 'paper',
     description: 'Szerokość kartki papieru A4.',
-  },
-  {
-    id: 'tile_60',
-    label: 'Płytka gresowa 60×60 cm',
-    sublabel: '60.0 cm (krawędź płytki)',
-    sizeMeters: 0.6,
-    category: 'tile',
-    description: 'Standardowa wielkoformatowa płytka posadzkowa lub ścienna.',
-  },
-  {
-    id: 'tile_30',
-    label: 'Płytka ceramiczna 30×30 cm',
-    sublabel: '30.0 cm (krawędź płytki)',
-    sizeMeters: 0.3,
-    category: 'tile',
-    description: 'Standardowa płytka łazienkowa / kuchenna.',
-  },
-  {
-    id: 'door_width',
-    label: 'Skrzydło drzwiowe (Szerokość)',
-    sublabel: '80.0 cm (norma budowlana)',
-    sizeMeters: 0.8,
-    category: 'door',
-    description: 'Typowa szerokość skrzydła drzwi wewnętrznych w świetle ościeżnicy.',
-  },
-  {
-    id: 'door_height',
-    label: 'Otwór drzwiowy (Wysokość)',
-    sublabel: '205.0 cm (norma budowlana)',
-    sizeMeters: 2.05,
-    category: 'door',
-    description: 'Wysokość skrzydła / ościeżnicy drzwiowej.',
+    orientation: 'horizontal',
   },
   {
     id: 'custom',
     label: 'Własny wymiar referencyjny',
-    sublabel: 'Zdefiniuj długość w metrach / cm',
+    sublabel: 'Zdefiniuj długość w cm / metrach',
     sizeMeters: 1.0,
     category: 'custom',
-    description: 'Dowolny znany odcinek (np. długość poziomicy, grzejnika lub krawędzi stołu).',
+    description: 'Dowolny znany odcinek (np. długość mebla, profilu lub odcinek taśmy).',
+    orientation: 'horizontal',
   },
 ];
 

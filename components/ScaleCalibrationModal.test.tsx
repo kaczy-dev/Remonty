@@ -19,11 +19,12 @@ describe('ScaleCalibrationModal Component', () => {
     );
 
     expect(screen.getByText('Kalibracja Optyczna Skali Pomiaru')).toBeDefined();
-    expect(screen.getByText('Karta Płatnicza')).toBeDefined();
-    expect(screen.getByText('Kartka A4')).toBeDefined();
-    expect(screen.getByText('Płytka 60×60')).toBeDefined();
-    expect(screen.getByText('Drzwi Standard')).toBeDefined();
-    expect(screen.getByText('Własny Wymiar')).toBeDefined();
+    expect(screen.getByText(/Poziomica budowlana 100 cm/)).toBeDefined();
+    expect(screen.getByText(/Płytka \/ Gres 60×60 cm/)).toBeDefined();
+    expect(screen.getAllByText(/Karta Płatnicza/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Arkusz A4/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Skrzydło \/ Ościeżnica/)).toBeDefined();
+    expect(screen.getByText(/Własny wymiar referencyjny/)).toBeDefined();
   });
 
   it('allows switching to custom dimension and adjusting cm value', () => {
@@ -37,7 +38,7 @@ describe('ScaleCalibrationModal Component', () => {
       />
     );
 
-    const customBtn = screen.getByText('Własny Wymiar');
+    const customBtn = screen.getByText(/Własny wymiar referencyjny/);
     fireEvent.click(customBtn);
 
     expect(screen.getByText('Wpisz znany wymiar (cm):')).toBeDefined();

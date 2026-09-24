@@ -17,11 +17,22 @@ import {
   Trash2,
   Home,
   Layers,
+  Compass,
+  Copy,
+  Check,
+  Share2,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
 import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
 import { calculateAtticMetrics } from '@/lib/geometry/attic-calculator';
+import {
+  evaluateDiagonals,
+  evaluateRule345,
+  evaluateCornerHeights,
+  calculateIdealDiagonal,
+  formatRoomSummaryForClipboard,
+} from '@/lib/geometry/squareness-calculator';
 
 interface ViewRoomScanMeasureProps {
   room: Room;
@@ -99,6 +110,31 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [length, setLength] = useState(room.length);
   const [height, setHeight] = useState(room.height);
 
+  React.useEffect(() => {
+    setWidth(room.width);
+    setLength(room.length);
+    setHeight(room.height);
+  }, [room.width, room.length, room.height]);
+
+  // Diagonals & Squareness Inspector state (PN-B-10100)
+  const [measuredD1, setMeasuredD1] = useState<string>('');
+  const [measuredD2, setMeasuredD2] = useState<string>('');
+  const [activeSquarenessTab, setActiveSquarenessTab] = useState<'diagonals' | 'rule345' | 'ceiling_heights'>('diagonals');
+
+  // Rule 3-4-5 state
+  const [rule345LegA, setRule345LegA] = useState<number>(0.6);
+  const [rule345LegB, setRule345LegB] = useState<number>(0.8);
+  const [rule345Hypo, setRule345Hypo] = useState<string>('1.00');
+
+  // 4 corners ceiling heights state
+  const [cornerNW, setCornerNW] = useState<string>(room.height.toFixed(2));
+  const [cornerNE, setCornerNE] = useState<string>(room.height.toFixed(2));
+  const [cornerSE, setCornerSE] = useState<string>(room.height.toFixed(2));
+  const [cornerSW, setCornerSW] = useState<string>(room.height.toFixed(2));
+
+  // Copy status feedback
+  const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
+
   const handleApplyDimensions = (
     newW: number,
     newL: number,
@@ -111,6 +147,20 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     onUpdateRoomDimensions(room.id, newW, newL, newH, newPoly ?? room.polygonVertices);
   };
 
+  // Quick metric micro-adjustments (+/- 1cm, +/- 5cm) for field readiness with laser meter / gloves
+  const adjustDimension = (dim: 'width' | 'length' | 'height', deltaM: number) => {
+    if (dim === 'width') {
+      const nextW = Math.max(0.5, Math.min(20.0, Math.round((width + deltaM) * 100) / 100));
+      handleApplyDimensions(nextW, length, height);
+    } else if (dim === 'length') {
+      const nextL = Math.max(0.5, Math.min(25.0, Math.round((length + deltaM) * 100) / 100));
+      handleApplyDimensions(width, nextL, height);
+    } else {
+      const nextH = Math.max(1.5, Math.min(6.0, Math.round((height + deltaM) * 100) / 100));
+      handleApplyDimensions(width, length, nextH);
+    }
+  };
+
   // Attic Roof Configuration & PN-ISO 9836 Metrics
   const atticRoof: RoomAtticRoof = room.atticRoof || {
     isAttic: false,
@@ -121,6 +171,76 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   };
 
   const atticMetrics = calculateAtticMetrics(room.width, room.length, room.height, room.atticRoof);
+
+  // Diagonals & Squareness evaluation (PN-B-10100)
+  const numD1 = parseFloat(measuredD1);
+  const numD2 = parseFloat(measuredD2);
+  const diagonalResult = evaluateDiagonals(
+    width,
+    length,
+    !isNaN(numD1) && numD1 > 0 ? numD1 : undefined,
+    !isNaN(numD2) && numD2 > 0 ? numD2 : undefined
+  );
+
+  const numRuleHypo = parseFloat(rule345Hypo);
+  const rule345Result = evaluateRule345(
+    rule345LegA,
+    rule345LegB,
+    !isNaN(numRuleHypo) && numRuleHypo > 0 ? numRuleHypo : undefined
+  );
+
+  const cornerHeightsResult = evaluateCornerHeights({
+    nw: parseFloat(cornerNW) || height,
+    ne: parseFloat(cornerNE) || height,
+    se: parseFloat(cornerSE) || height,
+    sw: parseFloat(cornerSW) || height,
+  });
+
+  // Copy structured room summary to clipboard for SMS / WhatsApp construction crews
+  const handleCopySummary = async () => {
+    const openingsCount = room.openings?.length || 0;
+    const openingsArea = (room.openings || []).reduce((acc, o) => acc + o.width * o.height, 0);
+
+    const summary = formatRoomSummaryForClipboard({
+      roomName: room.name || 'Pomieszczenie',
+      widthM: width,
+      lengthM: length,
+      heightM: height,
+      areaM2: room.area,
+      perimeterM: room.perimeter,
+      wallAreaNettoM2: room.wallArea,
+      openingsCount,
+      openingsAreaM2: Math.round(openingsArea * 100) / 100,
+      isAttic: room.atticRoof?.isAttic,
+      atticUsableAreaM2: atticMetrics.usableFloorAreaM2,
+      atticSlopeAreaM2: atticMetrics.slopeAreaM2,
+      diagonalCheck: (measuredD1 || measuredD2) ? {
+        d1M: diagonalResult.d1M,
+        d2M: diagonalResult.d2M,
+        differenceMm: diagonalResult.differenceMm,
+        quality: diagonalResult.quality,
+      } : undefined,
+    });
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(summary);
+      } else if (typeof document !== 'undefined') {
+        const textarea = document.createElement('textarea');
+        textarea.value = summary;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2500);
+    } catch (err) {
+      console.error('Failed to copy to clipboard', err);
+    }
+  };
 
   const handleUpdateAttic = (updated: Partial<RoomAtticRoof>) => {
     const nextConfig: RoomAtticRoof = {
@@ -324,6 +444,429 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     </div>
   );
 
+  // Diagonals & Squareness Inspector Card (PN-B-10100 & Reguła 3-4-5)
+  const renderDiagonalsInspectorCard = () => {
+    const qualityColors = {
+      ideal: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300',
+      minor_skew: 'border-amber-500/40 bg-amber-950/30 text-amber-300',
+      out_of_square: 'border-rose-500/40 bg-rose-950/30 text-rose-300',
+    };
+    const badgeColors = {
+      ideal: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+      minor_skew: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      out_of_square: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+    };
+
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4 shadow-sm" data-testid="diagonals-inspector-card">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl border border-teal-500/30 bg-teal-500/10 text-teal-400">
+              <Compass className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                Asystent Kątów Prostych & Przekątnych
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 font-mono">
+                  PN-B-10100
+                </span>
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                Weryfikacja geometrii narożników 90° dalmierzem przed płytkami lub zabudową G-K
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <button
+            type="button"
+            onClick={() => setActiveSquarenessTab('diagonals')}
+            className={`py-1.5 px-2 rounded-lg font-semibold transition text-center ${
+              activeSquarenessTab === 'diagonals'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Przekątne D1/D2
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSquarenessTab('rule345')}
+            className={`py-1.5 px-2 rounded-lg font-semibold transition text-center ${
+              activeSquarenessTab === 'rule345'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Reguła 3-4-5
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSquarenessTab('ceiling_heights')}
+            className={`py-1.5 px-2 rounded-lg font-semibold transition text-center ${
+              activeSquarenessTab === 'ceiling_heights'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Strop (4 Rogi)
+          </button>
+        </div>
+
+        {/* Tab 1: Diagonals */}
+        {activeSquarenessTab === 'diagonals' && (
+          <div className="space-y-4">
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Idealna przekątna dla {width.toFixed(2)}m × {length.toFixed(2)}m:</span>
+                <span className="font-mono font-bold text-teal-300 text-sm">
+                  {diagonalResult.idealDiagonalM.toFixed(3)} m
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between">
+                <span>Wzór: √(w² + l²) = √({(width * width).toFixed(2)} + {(length * length).toFixed(2)})</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMeasuredD1(diagonalResult.idealDiagonalM.toFixed(3));
+                    setMeasuredD2(diagonalResult.idealDiagonalM.toFixed(3));
+                  }}
+                  className="text-teal-400 hover:underline cursor-pointer font-sans"
+                >
+                  Wstaw wzorzec 90°
+                </button>
+              </div>
+            </div>
+
+            {/* Inputs Grid for D1 and D2 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* D1 input */}
+              <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-300">Przekątna D1 (m):</span>
+                  <span className="text-[10px] text-slate-500">Lewy-Góra ➔ Prawy-Dół</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.001"
+                    placeholder={diagonalResult.idealDiagonalM.toFixed(3)}
+                    value={measuredD1}
+                    onChange={(e) => setMeasuredD1(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-mono text-white focus:border-teal-500 focus:outline-hidden"
+                    data-testid="input-diagonal-d1"
+                  />
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = parseFloat(measuredD1) || diagonalResult.idealDiagonalM;
+                        setMeasuredD1((Math.round((cur - 0.01) * 1000) / 1000).toFixed(3));
+                      }}
+                      className="px-1.5 py-1 text-[10px] font-mono rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                      title="-1 cm"
+                    >
+                      -1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = parseFloat(measuredD1) || diagonalResult.idealDiagonalM;
+                        setMeasuredD1((Math.round((cur + 0.01) * 1000) / 1000).toFixed(3));
+                      }}
+                      className="px-1.5 py-1 text-[10px] font-mono rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                      title="+1 cm"
+                    >
+                      +1cm
+                    </button>
+                  </div>
+                </div>
+                {diagonalResult.deviationD1Mm !== undefined && (
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Odchyłka od ideału: <span className="text-teal-300 font-bold">{diagonalResult.deviationD1Mm} mm</span>
+                  </div>
+                )}
+              </div>
+
+              {/* D2 input */}
+              <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-300">Przekątna D2 (m):</span>
+                  <span className="text-[10px] text-slate-500">Lewy-Dół ➔ Prawy-Góra</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.001"
+                    placeholder={diagonalResult.idealDiagonalM.toFixed(3)}
+                    value={measuredD2}
+                    onChange={(e) => setMeasuredD2(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-mono text-white focus:border-teal-500 focus:outline-hidden"
+                    data-testid="input-diagonal-d2"
+                  />
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = parseFloat(measuredD2) || diagonalResult.idealDiagonalM;
+                        setMeasuredD2((Math.round((cur - 0.01) * 1000) / 1000).toFixed(3));
+                      }}
+                      className="px-1.5 py-1 text-[10px] font-mono rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                      title="-1 cm"
+                    >
+                      -1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = parseFloat(measuredD2) || diagonalResult.idealDiagonalM;
+                        setMeasuredD2((Math.round((cur + 0.01) * 1000) / 1000).toFixed(3));
+                      }}
+                      className="px-1.5 py-1 text-[10px] font-mono rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                      title="+1 cm"
+                    >
+                      +1cm
+                    </button>
+                  </div>
+                </div>
+                {diagonalResult.deviationD2Mm !== undefined && (
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Odchyłka od ideału: <span className="text-teal-300 font-bold">{diagonalResult.deviationD2Mm} mm</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Assessment Box */}
+            <div className={`p-4 rounded-xl border ${qualityColors[diagonalResult.quality]} space-y-2`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider inline-block mb-1 ${badgeColors[diagonalResult.quality]}`}>
+                    {diagonalResult.statusLabel}
+                  </span>
+                  <p className="text-xs leading-relaxed text-slate-200">
+                    {diagonalResult.recommendation}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] text-slate-400 block font-mono">RÓŻNICA |D1-D2|</span>
+                  <span className="text-base font-mono font-bold">
+                    {diagonalResult.differenceMm} mm
+                  </span>
+                </div>
+              </div>
+
+              {diagonalResult.cornerAngleDeg !== undefined && (
+                <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs font-mono text-slate-300">
+                  <span>Kąt narożnika (wg cosinusów):</span>
+                  <span className="font-bold text-white">
+                    {diagonalResult.cornerAngleDeg}° / {diagonalResult.adjacentAngleDeg}°
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Rule 3-4-5 */}
+        {activeSquarenessTab === 'rule345' && (
+          <div className="space-y-4">
+            <div>
+              <span className="text-xs font-semibold text-slate-300 block mb-1.5">Wybierz trójkąt wzorcowy:</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
+                {[
+                  { a: 0.3, b: 0.4, label: '30 × 40 × 50 cm' },
+                  { a: 0.6, b: 0.8, label: '60 × 80 × 100 cm' },
+                  { a: 1.2, b: 1.6, label: '1.20 × 1.60 × 2.00 m' },
+                  { a: 3.0, b: 4.0, label: '3.00 × 4.00 × 5.00 m' },
+                ].map((ps) => (
+                  <button
+                    key={ps.label}
+                    type="button"
+                    onClick={() => {
+                      setRule345LegA(ps.a);
+                      setRule345LegB(ps.b);
+                      setRule345Hypo(Math.hypot(ps.a, ps.b).toFixed(2));
+                    }}
+                    className={`p-2 rounded-xl border text-center transition font-mono ${
+                      rule345LegA === ps.a && rule345LegB === ps.b
+                        ? 'border-teal-500 bg-teal-950/40 text-teal-300 font-bold'
+                        : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    {ps.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Przyprostokątna A (m):</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={rule345LegA}
+                  onChange={(e) => setRule345LegA(parseFloat(e.target.value) || 0.6)}
+                  className="w-full bg-transparent font-mono font-bold text-white focus:outline-hidden"
+                />
+              </div>
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Przyprostokątna B (m):</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={rule345LegB}
+                  onChange={(e) => setRule345LegB(parseFloat(e.target.value) || 0.8)}
+                  className="w-full bg-transparent font-mono font-bold text-white focus:outline-hidden"
+                />
+              </div>
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Zmierzona hipotenuza (C):</span>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={rule345Hypo}
+                  onChange={(e) => setRule345Hypo(e.target.value)}
+                  className="w-full bg-transparent font-mono font-bold text-teal-300 focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${qualityColors[rule345Result.quality]} space-y-2`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider inline-block mb-1 ${badgeColors[rule345Result.quality]}`}>
+                    {rule345Result.statusLabel}
+                  </span>
+                  <p className="text-xs text-slate-200">
+                    {rule345Result.recommendation}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] text-slate-400 block font-mono">BŁĄD PRZECIWPROST.</span>
+                  <span className="text-base font-mono font-bold">
+                    {rule345Result.differenceMm} mm
+                  </span>
+                </div>
+              </div>
+              {rule345Result.angleDeg !== undefined && (
+                <div className="text-xs font-mono text-slate-300 pt-2 border-t border-slate-800 flex justify-between">
+                  <span>Kąt narożnika:</span>
+                  <span className="font-bold text-white">{rule345Result.angleDeg}°</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Ceiling heights */}
+        {activeSquarenessTab === 'ceiling_heights' && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-400">
+              Sprawdź wysokość kondygnacji dalmierzem pionowym w 4 narożnikach, aby wykryć uskok stropu lub posadzki przed sufitami podwieszanymi lub szafami pod sufit.
+            </p>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Lewy-Tył (NW):</span>
+                <div className="flex items-center gap-1 font-mono">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={cornerNW}
+                    onChange={(e) => setCornerNW(e.target.value)}
+                    className="w-full bg-transparent font-bold text-white focus:outline-hidden"
+                  />
+                  <span className="text-slate-500">m</span>
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Prawy-Tył (NE):</span>
+                <div className="flex items-center gap-1 font-mono">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={cornerNE}
+                    onChange={(e) => setCornerNE(e.target.value)}
+                    className="w-full bg-transparent font-bold text-white focus:outline-hidden"
+                  />
+                  <span className="text-slate-500">m</span>
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Lewy-Przód (SW):</span>
+                <div className="flex items-center gap-1 font-mono">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={cornerSW}
+                    onChange={(e) => setCornerSW(e.target.value)}
+                    className="w-full bg-transparent font-bold text-white focus:outline-hidden"
+                  />
+                  <span className="text-slate-500">m</span>
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 space-y-1">
+                <span className="text-slate-400 block text-[10px]">Prawy-Przód (SE):</span>
+                <div className="flex items-center gap-1 font-mono">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={cornerSE}
+                    onChange={(e) => setCornerSE(e.target.value)}
+                    className="w-full bg-transparent font-bold text-white focus:outline-hidden"
+                  />
+                  <span className="text-slate-500">m</span>
+                </div>
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${
+              cornerHeightsResult.quality === 'level'
+                ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
+                : cornerHeightsResult.quality === 'moderate_drop'
+                ? 'border-amber-500/40 bg-amber-950/30 text-amber-300'
+                : 'border-rose-500/40 bg-rose-950/30 text-rose-300'
+            } space-y-2`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider inline-block mb-1">
+                    {cornerHeightsResult.statusLabel}
+                  </span>
+                  <p className="text-xs text-slate-200">
+                    {cornerHeightsResult.recommendation}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] text-slate-400 block font-mono">USKOK STROPU</span>
+                  <span className="text-base font-mono font-bold">
+                    {cornerHeightsResult.differenceMm} mm
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-mono">
+                  Średnia H: <strong className="text-white">{cornerHeightsResult.avgHeightM.toFixed(2)} m</strong> (min: {cornerHeightsResult.minHeightM.toFixed(2)}m, max: {cornerHeightsResult.maxHeightM.toFixed(2)}m)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleApplyDimensions(width, length, cornerHeightsResult.avgHeightM)}
+                  className="px-2.5 py-1 text-xs rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold transition"
+                >
+                  Ustaw jako H pokoju
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Reusable 2D Blueprint SVG Canvas
   const renderBlueprintCanvas = (compact = false) => (
     <div className={`relative w-full ${compact ? 'aspect-[16/10] max-h-[440px]' : 'aspect-[4/3] max-h-[420px]'} rounded-xl border border-slate-700/80 bg-slate-950 p-4 overflow-hidden flex items-center justify-center select-none shadow-inner`}>
@@ -405,6 +948,42 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             strokeWidth="8" 
             rx="2"
           />
+        )}
+
+        {/* Diagonals & Squareness Lines Overlay on 2D Blueprint (PN-B-10100) */}
+        {(!room.polygonVertices || room.polygonVertices.length < 3) && (
+          <g className="pointer-events-none" opacity="0.45">
+            <line
+              x1="64"
+              y1="64"
+              x2="436"
+              y2="336"
+              stroke={
+                diagonalResult.quality === 'ideal'
+                  ? '#10b981'
+                  : diagonalResult.quality === 'minor_skew'
+                  ? '#f59e0b'
+                  : '#f43f5e'
+              }
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+            />
+            <line
+              x1="64"
+              y1="336"
+              x2="436"
+              y2="64"
+              stroke={
+                diagonalResult.quality === 'ideal'
+                  ? '#10b981'
+                  : diagonalResult.quality === 'minor_skew'
+                  ? '#f59e0b'
+                  : '#f43f5e'
+              }
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+            />
+          </g>
         )}
 
         {/* Dynamic Architectural Openings (Windows and Doors) */}
@@ -679,6 +1258,27 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               }}
             />
           </label>
+
+          {/* Quick Copy Room Summary for SMS / WhatsApp */}
+          <button
+            type="button"
+            onClick={handleCopySummary}
+            className="flex items-center gap-1.5 rounded-xl border border-teal-500/40 bg-teal-950/40 px-3 py-1.5 text-xs font-semibold text-teal-200 hover:bg-teal-900/60 hover:border-teal-400 transition cursor-pointer shadow-xs active:scale-95"
+            title="Kopiuj czytelne zestawienie wymiarów dla ekipy budowlanej (format SMS / WhatsApp)"
+            data-testid="copy-summary-btn"
+          >
+            {copiedSummary ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-300">Skopiowano obmiar!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-teal-400" />
+                <span>Kopiuj wymiary (SMS/WhatsApp)</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Calculated Room Metrics Badges */}
@@ -712,6 +1312,25 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             <span className="text-slate-400 text-[10px] uppercase block">Wysokość</span>
             <strong className="text-sm font-mono">{room.height.toFixed(2)} m</strong>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('blueprint')}
+            className={`rounded-xl border px-3 py-1.5 transition text-left cursor-pointer ${
+              measuredD1 || measuredD2
+                ? diagonalResult.quality === 'ideal'
+                  ? 'border-emerald-500/40 bg-emerald-950/40 text-emerald-300'
+                  : diagonalResult.quality === 'minor_skew'
+                  ? 'border-amber-500/40 bg-amber-950/40 text-amber-300'
+                  : 'border-rose-500/40 bg-rose-950/40 text-rose-300'
+                : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-teal-500/50'
+            }`}
+            title="Weryfikacja kątów prostych i przekątnych (PN-B-10100)"
+          >
+            <span className="text-slate-400 text-[10px] uppercase block">Kąty / Przekątna</span>
+            <strong className="text-sm font-mono">
+              {measuredD1 || measuredD2 ? `Δ=${diagonalResult.differenceMm}mm` : `${diagonalResult.idealDiagonalM.toFixed(2)} m`}
+            </strong>
+          </button>
         </div>
       </div>
 
@@ -730,14 +1349,51 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">Szerokość ściany frontowej:</span>
+                <span className="font-semibold text-slate-300">Szerokość (front):</span>
                 <span className="font-mono text-teal-400 font-bold">{width.toFixed(2)} m</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 py-0.5">
+                <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('width', -0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 5 cm"
+                  >
+                    -5cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('width', -0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 1 cm"
+                  >
+                    -1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('width', 0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 1 cm"
+                  >
+                    +1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('width', 0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 5 cm"
+                  >
+                    +5cm
+                  </button>
+                </div>
               </div>
               <input 
                 type="range" 
-                min="2.0" 
-                max="10.0" 
-                step="0.05" 
+                min="1.0" 
+                max="12.0" 
+                step="0.01" 
                 value={width}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
@@ -746,21 +1402,58 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 className="w-full accent-teal-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>min 2.0m</span>
-                <span>max 10.0m</span>
+                <span>min 1.0m</span>
+                <span>max 12.0m</span>
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">Długość ściany bocznej:</span>
+                <span className="font-semibold text-slate-300">Długość (bok):</span>
                 <span className="font-mono text-teal-400 font-bold">{length.toFixed(2)} m</span>
+              </div>
+              <div className="flex items-center justify-between gap-1 py-0.5">
+                <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('length', -0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 5 cm"
+                  >
+                    -5cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('length', -0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 1 cm"
+                  >
+                    -1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('length', 0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 1 cm"
+                  >
+                    +1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('length', 0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 5 cm"
+                  >
+                    +5cm
+                  </button>
+                </div>
               </div>
               <input 
                 type="range" 
-                min="2.0" 
-                max="12.0" 
-                step="0.05" 
+                min="1.0" 
+                max="15.0" 
+                step="0.01" 
                 value={length}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
@@ -769,8 +1462,8 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 className="w-full accent-teal-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>min 2.0m</span>
-                <span>max 12.0m</span>
+                <span>min 1.0m</span>
+                <span>max 15.0m</span>
               </div>
             </div>
 
@@ -779,11 +1472,48 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 <span className="font-semibold text-slate-300">Wysokość kondygnacji:</span>
                 <span className="font-mono text-teal-400 font-bold">{height.toFixed(2)} m</span>
               </div>
+              <div className="flex items-center justify-between gap-1 py-0.5">
+                <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('height', -0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 5 cm"
+                  >
+                    -5cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('height', -0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    title="Odejmij 1 cm"
+                  >
+                    -1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('height', 0.01)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 1 cm"
+                  >
+                    +1cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustDimension('height', 0.05)}
+                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    title="Dodaj 5 cm"
+                  >
+                    +5cm
+                  </button>
+                </div>
+              </div>
               <input 
                 type="range" 
-                min="2.2" 
-                max="4.5" 
-                step="0.05" 
+                min="2.0" 
+                max="5.0" 
+                step="0.01" 
                 value={height}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
@@ -792,8 +1522,8 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 className="w-full accent-teal-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>2.2m (niski strop)</span>
-                <span>4.5m (kamienica/loft)</span>
+                <span>2.0m (niski strop)</span>
+                <span>5.0m (kamienica/loft)</span>
               </div>
             </div>
           </div>
@@ -867,58 +1597,202 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 Dostosuj pomiary laserowe. Aplikacja natychmiast przeliczy zapotrzebowanie na płytki, farby i listwy.
               </p>
 
-              {/* Width Slider */}
+              {/* Width Slider & Micro-adjust */}
               <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-300 font-medium">Szerokość (A):</span>
-                  <span className="font-mono text-teal-300 font-bold">{width.toFixed(2)} m</span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.5"
+                      max="20"
+                      value={width}
+                      onChange={(e) => handleApplyDimensions(parseFloat(e.target.value) || width, length, height)}
+                      className="w-16 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-right font-bold text-teal-300 text-xs focus:border-teal-500 focus:outline-hidden"
+                    />
+                    <span className="text-teal-300 font-bold">m</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-1 py-0.5">
+                  <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('width', -0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 5 cm"
+                    >
+                      -5cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('width', -0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 1 cm"
+                    >
+                      -1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('width', 0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 1 cm"
+                    >
+                      +1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('width', 0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 5 cm"
+                    >
+                      +5cm
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="range"
                   min="1.0"
-                  max="10.0"
-                  step="0.05"
+                  max="12.0"
+                  step="0.01"
                   value={width}
                   onChange={(e) => handleApplyDimensions(parseFloat(e.target.value), length, height)}
                   className="w-full accent-teal-500 cursor-pointer h-1.5 rounded-lg bg-slate-800"
                 />
               </div>
 
-              {/* Length Slider */}
+              {/* Length Slider & Micro-adjust */}
               <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-300 font-medium">Długość (B):</span>
-                  <span className="font-mono text-teal-300 font-bold">{length.toFixed(2)} m</span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.5"
+                      max="25"
+                      value={length}
+                      onChange={(e) => handleApplyDimensions(width, parseFloat(e.target.value) || length, height)}
+                      className="w-16 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-right font-bold text-teal-300 text-xs focus:border-teal-500 focus:outline-hidden"
+                    />
+                    <span className="text-teal-300 font-bold">m</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-1 py-0.5">
+                  <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('length', -0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 5 cm"
+                    >
+                      -5cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('length', -0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 1 cm"
+                    >
+                      -1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('length', 0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 1 cm"
+                    >
+                      +1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('length', 0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 5 cm"
+                    >
+                      +5cm
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="range"
                   min="1.0"
-                  max="12.0"
-                  step="0.05"
+                  max="15.0"
+                  step="0.01"
                   value={length}
                   onChange={(e) => handleApplyDimensions(width, parseFloat(e.target.value), height)}
                   className="w-full accent-teal-500 cursor-pointer h-1.5 rounded-lg bg-slate-800"
                 />
               </div>
 
-              {/* Height Slider */}
+              {/* Height Slider & Micro-adjust */}
               <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-300 font-medium">Wysokość do sufitu (H):</span>
-                  <span className="font-mono text-teal-300 font-bold">{height.toFixed(2)} m</span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1.8"
+                      max="6.0"
+                      value={height}
+                      onChange={(e) => handleApplyDimensions(width, length, parseFloat(e.target.value) || height)}
+                      className="w-16 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-right font-bold text-teal-300 text-xs focus:border-teal-500 focus:outline-hidden"
+                    />
+                    <span className="text-teal-300 font-bold">m</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-1 py-0.5">
+                  <span className="text-[10px] text-slate-500 font-medium">Mikrokorekta:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('height', -0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 5 cm"
+                    >
+                      -5cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('height', -0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      title="Odejmij 1 cm"
+                    >
+                      -1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('height', 0.01)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 1 cm"
+                    >
+                      +1cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustDimension('height', 0.05)}
+                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      title="Dodaj 5 cm"
+                    >
+                      +5cm
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="range"
-                  min="2.2"
-                  max="4.0"
-                  step="0.05"
+                  min="2.0"
+                  max="5.0"
+                  step="0.01"
                   value={height}
                   onChange={(e) => handleApplyDimensions(width, length, parseFloat(e.target.value))}
                   className="w-full accent-teal-500 cursor-pointer h-1.5 rounded-lg bg-slate-800"
                 />
               </div>
 
-              {/* Mathematical Formula Preview */}
+              {/* Mathematical Formula Preview & Direct Share */}
               <div className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs space-y-1.5 text-slate-400">
                 <div className="flex justify-between">
                   <span>Pole posadzki (A × B):</span>
@@ -936,8 +1810,30 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <span>Pow. ścian netto (- otwory):</span>
                   <strong className="font-mono">{room.wallArea.toFixed(2)} m²</strong>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleCopySummary}
+                  className="w-full mt-2 py-2 px-3 rounded-xl border border-teal-500/40 bg-teal-950/40 hover:bg-teal-900/60 hover:border-teal-400 text-teal-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
+                  title="Kopiuj czytelne zestawienie pomiarów do schowka (format SMS / WhatsApp)"
+                  data-testid="copy-summary-blueprint-btn"
+                >
+                  {copiedSummary ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-300">Skopiowano zestawienie dla ekipy!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Kopiuj obmiar dla ekipy (SMS / WhatsApp)</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
+
+            {/* Asystent Kątów Prostych i Przekątnych (PN-B-10100) */}
+            {renderDiagonalsInspectorCard()}
 
             {/* Openings Management Card (Drzwi i Okna) */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">

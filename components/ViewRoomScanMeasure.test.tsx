@@ -239,4 +239,146 @@ describe('ViewRoomScanMeasure Component', () => {
     // Norm info box should be visible
     expect(screen.getByText(/Norma PN-ISO 9836/i)).toBeInTheDocument();
   });
+
+  it('renders Diagonals Inspector, calculates ideal diagonal, and assesses PN-B-10100 thresholds', () => {
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    // Switch to blueprint tab
+    const blueprintTabBtn = screen.getByRole('button', { name: /Rzut 2D/i });
+    fireEvent.click(blueprintTabBtn);
+
+    // Diagonals Inspector Card should be present
+    expect(screen.getByTestId('diagonals-inspector-card')).toBeInTheDocument();
+    expect(screen.getByText(/Asystent Kątów Prostych & Przekątnych/i)).toBeInTheDocument();
+
+    // For 4.0m x 5.0m, ideal diagonal is sqrt(16 + 25) = sqrt(41) ~ 6.403 m
+    expect(screen.getByText('6.403 m')).toBeInTheDocument();
+
+    const d1Input = screen.getByTestId('input-diagonal-d1');
+    const d2Input = screen.getByTestId('input-diagonal-d2');
+
+    // Case 1: Difference <= 5 mm (Ideal)
+    fireEvent.change(d1Input, { target: { value: '6.402' } });
+    fireEvent.change(d2Input, { target: { value: '6.405' } });
+    expect(screen.getByText('Idealny kąt prosty (odchyłka w normie PN-B-10100)')).toBeInTheDocument();
+    expect(screen.getByText('3 mm')).toBeInTheDocument();
+
+    // Case 2: Difference 6-15 mm (Minor skew)
+    fireEvent.change(d1Input, { target: { value: '6.400' } });
+    fireEvent.change(d2Input, { target: { value: '6.412' } });
+    expect(screen.getByText('Drobny skos (do wyrównania klejem lub tynkiem)')).toBeInTheDocument();
+    expect(screen.getByText('12 mm')).toBeInTheDocument();
+
+    // Case 3: Difference > 15 mm (Out of square)
+    fireEvent.change(d1Input, { target: { value: '6.380' } });
+    fireEvent.change(d2Input, { target: { value: '6.425' } });
+    expect(
+      screen.getByText('Wyraźny brak kąta prostego (wymaga korekty tynkarskiej lub przedścianki G-K)')
+    ).toBeInTheDocument();
+    expect(screen.getByText('45 mm')).toBeInTheDocument();
+  });
+
+  it('triggers onUpdateRoomDimensions when +/- 1cm or +/- 5cm micro-adjust buttons are clicked', () => {
+    const onUpdateRoomDimensionsMock = vi.fn();
+
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={onUpdateRoomDimensionsMock}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    // In 3D tab: width = 4.0, length = 5.0, height = 2.5
+    // Click +1cm for width
+    const add1cmButtons = screen.getAllByTitle('Dodaj 1 cm');
+    fireEvent.click(add1cmButtons[0]);
+    expect(onUpdateRoomDimensionsMock).toHaveBeenCalledWith(
+      'test-room-1',
+      4.01,
+      5.0,
+      2.5,
+      undefined
+    );
+
+    // Click -5cm for width (4.01m - 0.05m = 3.96m)
+    const sub5cmButtons = screen.getAllByTitle('Odejmij 5 cm');
+    fireEvent.click(sub5cmButtons[0]);
+    expect(onUpdateRoomDimensionsMock).toHaveBeenCalledWith(
+      'test-room-1',
+      3.96,
+      5.0,
+      2.5,
+      undefined
+    );
+  });
+
+  it('copies formatted room dimensions to clipboard in SMS / WhatsApp format', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextMock,
+      },
+    });
+
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const copyBtn = screen.getByTestId('copy-summary-btn');
+    expect(copyBtn).toBeInTheDocument();
+
+    fireEvent.click(copyBtn);
+
+    expect(writeTextMock).toHaveBeenCalledTimes(1);
+    const copiedText = writeTextMock.mock.calls[0][0];
+
+    // Verify SMS / WhatsApp format matches contractor expectations
+    expect(copiedText).toContain('Salon Testowy: 4.00m x 5.00m, H=2.50m');
+    expect(copiedText).toContain('Pow. podłogi: 20.00m²');
+    expect(copiedText).toContain('Obwód: 18.00m');
+    expect(copiedText).toContain('Pow. ścian netto: 40.5m²');
+
+    // Visual feedback after click
+    expect(await screen.findByText(/Skopiowano obmiar!/i)).toBeInTheDocument();
+  });
+
+  it('allows switching between Diagonals, Rule 3-4-5, and Ceiling Heights sub-tabs', () => {
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const blueprintTabBtn = screen.getByRole('button', { name: /Rzut 2D/i });
+    fireEvent.click(blueprintTabBtn);
+
+    // Switch to Rule 3-4-5
+    const rule345Btn = screen.getByRole('button', { name: /Reguła 3-4-5/i });
+    fireEvent.click(rule345Btn);
+    expect(screen.getByText(/Wybierz trójkąt wzorcowy/i)).toBeInTheDocument();
+    expect(screen.getByText(/Przyprostokątna A/i)).toBeInTheDocument();
+
+    // Switch to Ceiling Heights
+    const ceilingBtn = screen.getByRole('button', { name: /Strop \(4 Rogi\)/i });
+    fireEvent.click(ceilingBtn);
+    expect(screen.getAllByText(/USKOK STROPU/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Lewy-Tył \(NW\)/i)).toBeInTheDocument();
+  });
 });
