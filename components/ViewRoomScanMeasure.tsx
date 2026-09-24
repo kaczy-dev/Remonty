@@ -21,9 +21,13 @@ import {
   Copy,
   Check,
   Share2,
+  Bluetooth,
+  Sparkles,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
+import { LaserMeterModal } from '@/components/LaserMeterModal';
+import { PhotoMarkupModal } from '@/components/PhotoMarkupModal';
 import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
 import { calculateAtticMetrics } from '@/lib/geometry/attic-calculator';
 import {
@@ -134,6 +138,25 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
 
   // Copy status feedback
   const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
+
+  // Bluetooth Laser Meter Modal & Photo Markup Modal states
+  const [showLaserModal, setShowLaserModal] = useState<boolean>(false);
+  const [laserTargetField, setLaserTargetField] = useState<string>('width');
+  const [showPhotoMarkupModal, setShowPhotoMarkupModal] = useState<boolean>(false);
+
+  const handleLaserMeasurement = (dist: number, target: string) => {
+    if (target === 'width') {
+      handleApplyDimensions(dist, length, height);
+    } else if (target === 'length') {
+      handleApplyDimensions(width, dist, height);
+    } else if (target === 'height') {
+      handleApplyDimensions(width, length, dist);
+    } else if (target === 'd1') {
+      setMeasuredD1(dist.toFixed(3));
+    } else if (target === 'd2') {
+      setMeasuredD2(dist.toFixed(3));
+    }
+  };
 
   const handleApplyDimensions = (
     newW: number,
@@ -546,7 +569,21 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               {/* D1 input */}
               <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-300">Przekątna D1 (m):</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-300">Przekątna D1 (m):</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLaserTargetField('d1');
+                        setShowLaserModal(true);
+                      }}
+                      className="p-1 rounded-md text-teal-400 hover:bg-teal-950/60 hover:text-teal-300 border border-teal-500/30 transition"
+                      title="Pobierz D1 z dalmierza laserowego"
+                      aria-label="Laser D1"
+                    >
+                      <Bluetooth className="w-3 h-3" />
+                    </button>
+                  </div>
                   <span className="text-[10px] text-slate-500">Lewy-Góra ➔ Prawy-Dół</span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -594,7 +631,21 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               {/* D2 input */}
               <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-300">Przekątna D2 (m):</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-300">Przekątna D2 (m):</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLaserTargetField('d2');
+                        setShowLaserModal(true);
+                      }}
+                      className="p-1 rounded-md text-teal-400 hover:bg-teal-950/60 hover:text-teal-300 border border-teal-500/30 transition"
+                      title="Pobierz D2 z dalmierza laserowego"
+                      aria-label="Laser D2"
+                    >
+                      <Bluetooth className="w-3 h-3" />
+                    </button>
+                  </div>
                   <span className="text-[10px] text-slate-500">Lewy-Dół ➔ Prawy-Góra</span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -1259,6 +1310,33 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             />
           </label>
 
+          {/* Photo Markup Button (MeasureOn Style) */}
+          <button
+            type="button"
+            onClick={() => setShowPhotoMarkupModal(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-950/40 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-900/60 hover:border-amber-400 transition cursor-pointer shadow-xs active:scale-95"
+            title="Nanieś wymiary i punkty instalacyjne bezpośrednio na zdjęcie ściany"
+            data-testid="open-photo-markup-btn"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Foto-Wymiarowanie</span>
+          </button>
+
+          {/* Bluetooth Laser Meter Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setLaserTargetField('width');
+              setShowLaserModal(true);
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-teal-500/40 bg-teal-950/50 px-3 py-1.5 text-xs font-semibold text-teal-300 hover:bg-teal-900/60 hover:border-teal-400 transition cursor-pointer shadow-xs active:scale-95"
+            title="Połącz z dalmierzem laserowym Bluetooth (Bosch, Leica, uniwersalne BLE)"
+            data-testid="open-laser-modal-btn"
+          >
+            <Bluetooth className="w-3.5 h-3.5 text-teal-400" />
+            <span>Dalmierz BLE</span>
+          </button>
+
           {/* Quick Copy Room Summary for SMS / WhatsApp */}
           <button
             type="button"
@@ -1349,7 +1427,21 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">Szerokość (front):</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-300">Szerokość (front):</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLaserTargetField('width');
+                      setShowLaserModal(true);
+                    }}
+                    className="p-1 rounded-md text-teal-400 hover:bg-teal-950/60 hover:text-teal-300 border border-teal-500/30 transition"
+                    title="Pobierz szerokość z dalmierza BLE"
+                    aria-label="Laser szerokość"
+                  >
+                    <Bluetooth className="w-3 h-3" />
+                  </button>
+                </div>
                 <span className="font-mono text-teal-400 font-bold">{width.toFixed(2)} m</span>
               </div>
               <div className="flex items-center justify-between gap-1 py-0.5">
@@ -1409,7 +1501,21 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">Długość (bok):</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-300">Długość (bok):</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLaserTargetField('length');
+                      setShowLaserModal(true);
+                    }}
+                    className="p-1 rounded-md text-teal-400 hover:bg-teal-950/60 hover:text-teal-300 border border-teal-500/30 transition"
+                    title="Pobierz długość z dalmierza BLE"
+                    aria-label="Laser długość"
+                  >
+                    <Bluetooth className="w-3 h-3" />
+                  </button>
+                </div>
                 <span className="font-mono text-teal-400 font-bold">{length.toFixed(2)} m</span>
               </div>
               <div className="flex items-center justify-between gap-1 py-0.5">
@@ -1469,7 +1575,21 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">Wysokość kondygnacji:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-300">Wysokość kondygnacji:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLaserTargetField('height');
+                      setShowLaserModal(true);
+                    }}
+                    className="p-1 rounded-md text-teal-400 hover:bg-teal-950/60 hover:text-teal-300 border border-teal-500/30 transition"
+                    title="Pobierz wysokość z dalmierza BLE"
+                    aria-label="Laser wysokość"
+                  >
+                    <Bluetooth className="w-3 h-3" />
+                  </button>
+                </div>
                 <span className="font-mono text-teal-400 font-bold">{height.toFixed(2)} m</span>
               </div>
               <div className="flex items-center justify-between gap-1 py-0.5">
@@ -2338,6 +2458,28 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
         </div>
       )}
 
+      {/* Bluetooth Laser Meter Modal */}
+      <LaserMeterModal
+        isOpen={showLaserModal}
+        onClose={() => setShowLaserModal(false)}
+        currentTargetField={laserTargetField}
+        onSelectTargetField={(field) => setLaserTargetField(field)}
+        onApplyMeasurement={handleLaserMeasurement}
+      />
+
+      {/* Photo Markup & Dimensioning Modal */}
+      <PhotoMarkupModal
+        isOpen={showPhotoMarkupModal}
+        onClose={() => setShowPhotoMarkupModal(false)}
+        initialPhotoUrl={activePhoto}
+        roomName={room.name}
+        onSaveToProject={(blob) => {
+          const photoId = `${room.id}-markup-${Date.now()}`;
+          savePhotoBlob(photoId, blob)
+            .then(() => onUpdateRoomPhoto?.(room.id, `${LOCAL_PHOTO_PREFIX}${photoId}`))
+            .catch((err) => console.error('Failed to save markup photo', err));
+        }}
+      />
     </div>
   );
 };

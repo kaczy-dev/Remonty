@@ -25,6 +25,8 @@ import {
   FolderKanban,
   Keyboard,
   ArrowRight,
+  Bluetooth,
+  Sparkles,
 } from 'lucide-react';
 
 export interface CommandPaletteModalProps {
@@ -45,6 +47,8 @@ export interface CommandPaletteModalProps {
   onOpenKeyboardShortcuts: () => void;
   onToggleWakeLock?: () => void;
   onToggleTheme?: () => void;
+  onOpenLaserMeter?: () => void;
+  onOpenPhotoMarkup?: () => void;
 }
 
 interface CommandItem {
@@ -82,6 +86,8 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onOpenKeyboardShortcuts,
   onToggleWakeLock,
   onToggleTheme,
+  onOpenLaserMeter,
+  onOpenPhotoMarkup,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -246,6 +252,34 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         onOpenAIModal();
       },
     });
+
+    if (onOpenPhotoMarkup) {
+      list.push({
+        id: 'action-photo-markup',
+        title: 'Foto-Wymiarowanie ściany (Photo Markup)',
+        description: 'Nanieś strzałki wymiarowe, puszki elektryczne i instalacje na zdjęcie',
+        category: 'Szybkie akcje',
+        icon: <Sparkles className="w-4 h-4 text-amber-400" />,
+        onSelect: () => {
+          onClose();
+          onOpenPhotoMarkup();
+        },
+      });
+    }
+
+    if (onOpenLaserMeter) {
+      list.push({
+        id: 'action-laser-meter',
+        title: 'Dalmierz Laserowy Bluetooth (BLE)',
+        description: 'Połącz bezprzewodowo dalmierz Bosch GLM, Leica DISTO lub chiński BLE',
+        category: 'Szybkie akcje',
+        icon: <Bluetooth className="w-4 h-4 text-teal-400" />,
+        onSelect: () => {
+          onClose();
+          onOpenLaserMeter();
+        },
+      });
+    }
 
     if (onToggleWakeLock) {
       list.push({

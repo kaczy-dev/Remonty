@@ -381,4 +381,40 @@ describe('ViewRoomScanMeasure Component', () => {
     expect(screen.getAllByText(/USKOK STROPU/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Lewy-Tył \(NW\)/i)).toBeInTheDocument();
   });
+
+  it('opens Bluetooth Laser Meter Modal when clicking Dalmierz BLE button', () => {
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const laserBtn = screen.getByTestId('open-laser-modal-btn');
+    fireEvent.click(laserBtn);
+
+    expect(screen.getByText('Dalmierz Laserowy Bluetooth')).toBeInTheDocument();
+    expect(screen.getByText('Połącz z Dalmierzem (BLE)')).toBeInTheDocument();
+  });
+
+  it('opens Photo Markup Modal when clicking Foto-Wymiarowanie button', () => {
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const photoMarkupBtn = screen.getByTestId('open-photo-markup-btn');
+    fireEvent.click(photoMarkupBtn);
+
+    expect(screen.getByText(/Foto-Wymiarowanie • Salon Testowy/i)).toBeInTheDocument();
+    expect(screen.getByText('Wymiar (Strzałka)')).toBeInTheDocument();
+    expect(screen.getByText('Pinezka instalacji')).toBeInTheDocument();
+  });
 });
+

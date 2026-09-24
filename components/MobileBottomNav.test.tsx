@@ -38,6 +38,8 @@ describe('MobileBottomNav (Native iOS/Android PWA Tab Bar)', () => {
     onToggleTheme: vi.fn(),
     theme: 'dark',
     onOpenScanner: vi.fn(),
+    onOpenLaserMeter: vi.fn(),
+    onOpenPhotoMarkup: vi.fn(),
   };
 
   beforeEach(() => {
@@ -124,6 +126,22 @@ describe('MobileBottomNav (Native iOS/Android PWA Tab Bar)', () => {
     // 2. AR Scanner
     fireEvent.click(screen.getByTestId('action-ar-scanner'));
     expect(defaultProps.onOpenScanner).toHaveBeenCalled();
+    expect(screen.queryByTestId('quick-actions-sheet')).not.toBeInTheDocument();
+
+    // Reopen FAB
+    fireEvent.click(screen.getByTestId('tab-fab'));
+
+    // 2b. Photo Markup
+    fireEvent.click(screen.getByTestId('action-photo-markup'));
+    expect(defaultProps.onOpenPhotoMarkup).toHaveBeenCalled();
+    expect(screen.queryByTestId('quick-actions-sheet')).not.toBeInTheDocument();
+
+    // Reopen FAB
+    fireEvent.click(screen.getByTestId('tab-fab'));
+
+    // 2c. Laser Meter
+    fireEvent.click(screen.getByTestId('action-laser-meter'));
+    expect(defaultProps.onOpenLaserMeter).toHaveBeenCalled();
     expect(screen.queryByTestId('quick-actions-sheet')).not.toBeInTheDocument();
 
     // Reopen FAB

@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Sparkles,
   Check,
+  Bluetooth,
 } from 'lucide-react';
 import { RenovationPipelineStep } from '@/types/renovation';
 
@@ -40,6 +41,8 @@ export interface MobileBottomNavProps {
   onToggleTheme?: () => void;
   theme?: 'dark' | 'light';
   onOpenScanner?: () => void;
+  onOpenLaserMeter?: () => void;
+  onOpenPhotoMarkup?: () => void;
 }
 
 const triggerHaptic = (ms: number = 12) => {
@@ -65,6 +68,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onToggleTheme,
   theme = 'dark',
   onOpenScanner,
+  onOpenLaserMeter,
+  onOpenPhotoMarkup,
 }) => {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
@@ -365,6 +370,67 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition" />
                 </button>
+
+                {/* 2b. Foto-Wymiarowanie ściany (MeasureOn Style) */}
+                {onOpenPhotoMarkup && (
+                  <button
+                    type="button"
+                    data-testid="action-photo-markup"
+                    onClick={() => {
+                      triggerHaptic(12);
+                      setIsQuickActionsOpen(false);
+                      onOpenPhotoMarkup();
+                    }}
+                    className="w-full flex items-center justify-between p-3 rounded-2xl border border-slate-800 bg-slate-900/80 hover:bg-slate-850 active:bg-slate-800 transition text-left group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 group-hover:scale-105 transition">
+                        <Sparkles className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-100 group-hover:text-amber-300 transition">
+                          Foto-Wymiarowanie ściany
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Strzałki wymiarowe i punkty instalacji na zdjęciu
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition" />
+                  </button>
+                )}
+
+                {/* 2c. Dalmierz Laserowy BLE */}
+                {onOpenLaserMeter && (
+                  <button
+                    type="button"
+                    data-testid="action-laser-meter"
+                    onClick={() => {
+                      triggerHaptic(12);
+                      setIsQuickActionsOpen(false);
+                      onOpenLaserMeter();
+                    }}
+                    className="w-full flex items-center justify-between p-3 rounded-2xl border border-teal-500/30 bg-teal-950/20 hover:bg-teal-900/30 active:bg-teal-900/50 transition text-left group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-500/20 text-teal-300 border border-teal-500/40 group-hover:scale-105 transition">
+                        <Bluetooth className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-teal-200 group-hover:text-teal-100 transition flex items-center gap-1.5">
+                          Dalmierz Laserowy (BLE)
+                          <span className="rounded-full bg-teal-500/30 px-1.5 py-0.2 text-[9px] font-mono text-teal-300 border border-teal-500/40">
+                            Bluetooth
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Bosch GLM, Leica DISTO, bezprzewodowy odczyt
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-teal-400" />
+                  </button>
+                )}
 
                 {/* 3. Generuj raport PDF i kosztorys */}
                 <button

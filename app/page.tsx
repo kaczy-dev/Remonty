@@ -1046,6 +1046,20 @@ export default function HomePage() {
         onOpenKeyboardShortcuts={() => setIsShortcutsModalOpen(true)}
         onToggleWakeLock={handleToggleWakeLock}
         onToggleTheme={handleToggleTheme}
+        onOpenLaserMeter={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-laser-modal-btn"]') as HTMLButtonElement | null;
+            btn?.click();
+          }, 120);
+        }}
+        onOpenPhotoMarkup={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-photo-markup-btn"]') as HTMLButtonElement | null;
+            btn?.click();
+          }, 120);
+        }}
       />
 
       <KeyboardShortcutsModal
@@ -1070,6 +1084,20 @@ export default function HomePage() {
           setActivePipelineStep('measure');
           setTimeout(() => {
             document.getElementById('tab-camera-grid-btn')?.click();
+          }, 120);
+        }}
+        onOpenLaserMeter={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-laser-modal-btn"]') as HTMLButtonElement | null;
+            btn?.click();
+          }, 120);
+        }}
+        onOpenPhotoMarkup={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-photo-markup-btn"]') as HTMLButtonElement | null;
+            btn?.click();
           }, 120);
         }}
       />
