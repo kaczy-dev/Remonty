@@ -1060,6 +1060,13 @@ export default function HomePage() {
             btn?.click();
           }, 120);
         }}
+        onOpenVoiceAssistant={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-voice-modal-btn"]') as HTMLButtonElement | null;
+            btn?.click();
+          }, 120);
+        }}
       />
 
       <KeyboardShortcutsModal
@@ -1097,6 +1104,13 @@ export default function HomePage() {
           setActivePipelineStep('measure');
           setTimeout(() => {
             const btn = document.querySelector('[data-testid="open-photo-markup-btn"]') as HTMLButtonElement | null;
+            btn?.click();
+          }, 120);
+        }}
+        onOpenVoiceAssistant={() => {
+          setActivePipelineStep('measure');
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="open-voice-modal-btn"]') as HTMLButtonElement | null;
             btn?.click();
           }, 120);
         }}

@@ -27,6 +27,7 @@ import {
   ArrowRight,
   Bluetooth,
   Sparkles,
+  Mic,
 } from 'lucide-react';
 
 export interface CommandPaletteModalProps {
@@ -49,6 +50,7 @@ export interface CommandPaletteModalProps {
   onToggleTheme?: () => void;
   onOpenLaserMeter?: () => void;
   onOpenPhotoMarkup?: () => void;
+  onOpenVoiceAssistant?: () => void;
 }
 
 interface CommandItem {
@@ -88,6 +90,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onToggleTheme,
   onOpenLaserMeter,
   onOpenPhotoMarkup,
+  onOpenVoiceAssistant,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -277,6 +280,21 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         onSelect: () => {
           onClose();
           onOpenLaserMeter();
+        },
+      });
+    }
+
+    if (onOpenVoiceAssistant) {
+      list.push({
+        id: 'action-voice-assistant',
+        title: 'Asystent Głosowy „Wolne Ręce” (PL Voice AI)',
+        description: 'Wprowadzaj wymiary, wydatki i notatki głosem bez dotykania telefonu',
+        category: 'Szybkie akcje',
+        icon: <Mic className="w-4 h-4 text-rose-400" />,
+        shortcutBadge: 'V',
+        onSelect: () => {
+          onClose();
+          onOpenVoiceAssistant();
         },
       });
     }

@@ -25,6 +25,7 @@ import {
   Sparkles,
   Check,
   Bluetooth,
+  Mic,
 } from 'lucide-react';
 import { RenovationPipelineStep } from '@/types/renovation';
 
@@ -43,6 +44,7 @@ export interface MobileBottomNavProps {
   onOpenScanner?: () => void;
   onOpenLaserMeter?: () => void;
   onOpenPhotoMarkup?: () => void;
+  onOpenVoiceAssistant?: () => void;
 }
 
 const triggerHaptic = (ms: number = 12) => {
@@ -70,6 +72,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenScanner,
   onOpenLaserMeter,
   onOpenPhotoMarkup,
+  onOpenVoiceAssistant,
 }) => {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
@@ -429,6 +432,38 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-teal-400" />
+                  </button>
+                )}
+
+                {/* 2d. Asystent Głosowy „Wolne Ręce” */}
+                {onOpenVoiceAssistant && (
+                  <button
+                    type="button"
+                    data-testid="action-voice-assistant"
+                    onClick={() => {
+                      triggerHaptic(12);
+                      setIsQuickActionsOpen(false);
+                      onOpenVoiceAssistant();
+                    }}
+                    className="w-full flex items-center justify-between p-3 rounded-2xl border border-rose-500/30 bg-rose-950/20 hover:bg-rose-900/30 active:bg-rose-900/50 transition text-left group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 group-hover:scale-105 transition">
+                        <Mic className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-rose-200 group-hover:text-rose-100 transition flex items-center gap-1.5">
+                          Głos „Wolne Ręce”
+                          <span className="rounded-full bg-rose-500/30 px-1.5 py-0.2 text-[9px] font-mono text-rose-300 border border-rose-500/40">
+                            PL Voice AI
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Wprowadzanie wymiarów i wydatków mową na budowie
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-rose-400" />
                   </button>
                 )}
 

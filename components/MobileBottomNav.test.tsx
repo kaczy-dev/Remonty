@@ -40,6 +40,7 @@ describe('MobileBottomNav (Native iOS/Android PWA Tab Bar)', () => {
     onOpenScanner: vi.fn(),
     onOpenLaserMeter: vi.fn(),
     onOpenPhotoMarkup: vi.fn(),
+    onOpenVoiceAssistant: vi.fn(),
   };
 
   beforeEach(() => {
@@ -142,6 +143,14 @@ describe('MobileBottomNav (Native iOS/Android PWA Tab Bar)', () => {
     // 2c. Laser Meter
     fireEvent.click(screen.getByTestId('action-laser-meter'));
     expect(defaultProps.onOpenLaserMeter).toHaveBeenCalled();
+    expect(screen.queryByTestId('quick-actions-sheet')).not.toBeInTheDocument();
+
+    // Reopen FAB
+    fireEvent.click(screen.getByTestId('tab-fab'));
+
+    // 2d. Voice Assistant
+    fireEvent.click(screen.getByTestId('action-voice-assistant'));
+    expect(defaultProps.onOpenVoiceAssistant).toHaveBeenCalled();
     expect(screen.queryByTestId('quick-actions-sheet')).not.toBeInTheDocument();
 
     // Reopen FAB

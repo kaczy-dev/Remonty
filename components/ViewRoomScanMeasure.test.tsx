@@ -416,5 +416,36 @@ describe('ViewRoomScanMeasure Component', () => {
     expect(screen.getByText('Wymiar (Strzałka)')).toBeInTheDocument();
     expect(screen.getByText('Pinezka instalacji')).toBeInTheDocument();
   });
+
+  it('opens Hands-Free Voice Assistant Modal when clicking Głos Wolne Ręce button and applies dimension command', () => {
+    const onUpdateRoomDimensionsMock = vi.fn();
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={onUpdateRoomDimensionsMock}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const voiceBtn = screen.getByTestId('open-voice-modal-btn');
+    fireEvent.click(voiceBtn);
+
+    expect(screen.getByText('Asystent Głosowy „Wolne Ręce”')).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText(/Wpisz komendę/i);
+    const submitBtn = screen.getByText('Wyślij');
+    fireEvent.change(input, { target: { value: 'szerokość 3,80' } });
+    fireEvent.click(submitBtn);
+
+    expect(onUpdateRoomDimensionsMock).toHaveBeenCalledWith(
+      'test-room-1',
+      3.8,
+      mockRoom.length,
+      mockRoom.height,
+      mockRoom.polygonVertices
+    );
+  });
 });
+
 

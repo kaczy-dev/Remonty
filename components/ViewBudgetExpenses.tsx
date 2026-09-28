@@ -31,7 +31,10 @@ import {
   Paperclip,
   Users,
   Activity,
+  Mic,
 } from 'lucide-react';
+import { VoiceAssistantModal } from '@/components/VoiceAssistantModal';
+import type { VoiceCommandResult } from '@/lib/voice/speech-parser';
 
 interface ViewBudgetExpensesProps {
   project: RenovationProject;
@@ -91,6 +94,21 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
   const [receiptFilter, setReceiptFilter] = useState<'all' | 'with_receipt' | 'no_receipt'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewingExpense, setViewingExpense] = useState<Expense | null>(null);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+
+  const handleVoiceCommand = (cmd: VoiceCommandResult) => {
+    if (cmd.type === 'ADD_EXPENSE' && cmd.expensePayload) {
+      onAddExpense({
+        id: `exp-${Date.now()}`,
+        title: cmd.expensePayload.title,
+        amount: cmd.expensePayload.amount,
+        category: cmd.expensePayload.category as ExpenseCategory,
+        date: new Date().toISOString().split('T')[0],
+        paid: true,
+        paymentMethod: 'Gotówka',
+      });
+    }
+  };
 
   // Calculations
   const totalSpent = useMemo(() => {
@@ -284,6 +302,16 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
             >
               <Plus className="w-4 h-4" />
               <span>Dodaj wydatek</span>
+            </button>
+            <button
+              id="voice-expense-btn"
+              data-testid="voice-expense-btn"
+              onClick={() => setShowVoiceModal(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 hover:border-rose-400 transition cursor-pointer shadow-xs"
+              title="Głosowe dodawanie wydatków (PL Voice AI)"
+            >
+              <Mic className="w-3.5 h-3.5 text-rose-400" />
+              <span>Głos „Wolne Ręce”</span>
             </button>
           </div>
         )}
@@ -626,6 +654,13 @@ export const ViewBudgetExpenses: React.FC<ViewBudgetExpensesProps> = ({
             setViewingExpense({ ...viewingExpense, receiptPhotoId: photoId });
           }
         }}
+      />
+
+      {/* Hands-Free Voice Assistant Modal */}
+      <VoiceAssistantModal
+        isOpen={showVoiceModal}
+        onClose={() => setShowVoiceModal(false)}
+        onApplyCommand={handleVoiceCommand}
       />
 
     </div>

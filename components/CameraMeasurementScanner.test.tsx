@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { CameraMeasurementScanner } from './CameraMeasurementScanner';
 
@@ -305,14 +305,12 @@ describe('CameraMeasurementScanner Component', () => {
     const fileInput = screen.getByLabelText('Wybierz zdjęcie z galerii') as HTMLInputElement;
     const file = new File(['mock'], 'zdjecie-budowa.jpg', { type: 'image/jpeg' });
 
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-      // Allow simulated async Image.onload / FileReader.onload
-      await new Promise((r) => setTimeout(r, 30));
-    });
+    fireEvent.change(fileInput, { target: { files: [file] } });
 
-    // Should display photo source badge and live camera return button
-    expect(screen.getByText(/zdjecie-budowa\.jpg/)).toBeDefined();
+    await waitFor(() => {
+      // Should display photo source badge and live camera return button
+      expect(screen.getByText(/zdjecie-budowa\.jpg/)).toBeDefined();
+    });
     expect(screen.getByText('Kamera na żywo')).toBeDefined();
   });
 });

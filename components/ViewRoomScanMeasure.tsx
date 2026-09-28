@@ -23,11 +23,14 @@ import {
   Share2,
   Bluetooth,
   Sparkles,
+  Mic,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
 import { LaserMeterModal } from '@/components/LaserMeterModal';
 import { PhotoMarkupModal } from '@/components/PhotoMarkupModal';
+import { VoiceAssistantModal } from '@/components/VoiceAssistantModal';
+import type { VoiceCommandResult } from '@/lib/voice/speech-parser';
 import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
 import { calculateAtticMetrics } from '@/lib/geometry/attic-calculator';
 import {
@@ -143,6 +146,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [showLaserModal, setShowLaserModal] = useState<boolean>(false);
   const [laserTargetField, setLaserTargetField] = useState<string>('width');
   const [showPhotoMarkupModal, setShowPhotoMarkupModal] = useState<boolean>(false);
+  const [showVoiceAssistantModal, setShowVoiceAssistantModal] = useState<boolean>(false);
 
   const handleLaserMeasurement = (dist: number, target: string) => {
     if (target === 'width') {
@@ -155,6 +159,42 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
       setMeasuredD1(dist.toFixed(3));
     } else if (target === 'd2') {
       setMeasuredD2(dist.toFixed(3));
+    }
+  };
+
+  const handleVoiceCommand = (cmd: VoiceCommandResult) => {
+    if (cmd.type === 'SET_DIMENSION' && cmd.dimensionPayload) {
+      const { target, value } = cmd.dimensionPayload;
+      if (target === 'width') {
+        handleApplyDimensions(value, length, height);
+      } else if (target === 'length') {
+        handleApplyDimensions(width, value, height);
+      } else if (target === 'height') {
+        handleApplyDimensions(width, length, value);
+      } else if (target === 'diagonal1') {
+        setMeasuredD1(value.toFixed(3));
+      } else if (target === 'diagonal2') {
+        setMeasuredD2(value.toFixed(3));
+      }
+    } else if (cmd.type === 'ADD_OPENING' && cmd.openingPayload) {
+      const { type, width: opW, height: opH, typeLabel } = cmd.openingPayload;
+      if (onAddOpening) {
+        onAddOpening(room.id, {
+          id: `op-${Date.now()}`,
+          type,
+          name: `${typeLabel} ${opW.toFixed(2)}×${opH.toFixed(2)}m`,
+          width: opW,
+          height: opH,
+          wall: 'front',
+          sillHeight: type === 'window' ? 0.85 : 0,
+        });
+      }
+    } else if (cmd.type === 'TRIGGER_ACTION' && cmd.actionPayload) {
+      if (cmd.actionPayload.action === 'laser_measure') {
+        setShowVoiceAssistantModal(false);
+        setLaserTargetField('width');
+        setShowLaserModal(true);
+      }
     }
   };
 
@@ -1337,6 +1377,18 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             <span>Dalmierz BLE</span>
           </button>
 
+          {/* Hands-Free Voice Assistant Button */}
+          <button
+            type="button"
+            onClick={() => setShowVoiceAssistantModal(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 hover:border-rose-400 transition cursor-pointer shadow-xs active:scale-95"
+            title="Głosowe wprowadzanie wymiarów i poleceń (PL Voice AI)"
+            data-testid="open-voice-modal-btn"
+          >
+            <Mic className="w-3.5 h-3.5 text-rose-400" />
+            <span>Głos „Wolne Ręce”</span>
+          </button>
+
           {/* Quick Copy Room Summary for SMS / WhatsApp */}
           <button
             type="button"
@@ -2479,6 +2531,14 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
             .then(() => onUpdateRoomPhoto?.(room.id, `${LOCAL_PHOTO_PREFIX}${photoId}`))
             .catch((err) => console.error('Failed to save markup photo', err));
         }}
+      />
+
+      {/* Hands-Free Voice Assistant Modal */}
+      <VoiceAssistantModal
+        isOpen={showVoiceAssistantModal}
+        onClose={() => setShowVoiceAssistantModal(false)}
+        onApplyCommand={handleVoiceCommand}
+        currentRoomName={room.name}
       />
     </div>
   );
