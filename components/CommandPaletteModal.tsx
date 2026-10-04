@@ -97,11 +97,18 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Focus input whenever opened
-  useEffect(() => {
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
+    }
+  }
+
+  // Focus input whenever opened
+  useEffect(() => {
+    if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
       }, 50);
@@ -370,6 +377,9 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     onOpenReportModal,
     onOpenBackupModal,
     onOpenAIModal,
+    onOpenLaserMeter,
+    onOpenPhotoMarkup,
+    onOpenVoiceAssistant,
     onToggleWakeLock,
     onToggleTheme,
     onOpenProjectSwitcher,
@@ -389,10 +399,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     });
   }, [items, query]);
 
-  // Reset selectedIndex if out of bounds
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [filteredItems.length]);
+  const safeSelectedIndex = selectedIndex >= filteredItems.length ? 0 : selectedIndex;
 
   // Keyboard navigation handler
   const handleKeyDown = useCallback(
@@ -405,15 +412,15 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % Math.max(1, filteredItems.length));
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        if (filteredItems[selectedIndex]) {
-          filteredItems[selectedIndex].onSelect();
+        if (filteredItems[safeSelectedIndex]) {
+          filteredItems[safeSelectedIndex].onSelect();
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
       }
     },
-    [filteredItems, selectedIndex, onClose]
+    [filteredItems, safeSelectedIndex, onClose]
   );
 
   // Scroll active item into view
@@ -424,7 +431,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         activeEl.scrollIntoView({ block: 'nearest' });
       }
     }
-  }, [selectedIndex]);
+  }, [safeSelectedIndex]);
 
   if (!isOpen) return null;
 
@@ -447,13 +454,19 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIndex(0);
+            }}
             placeholder="Szukaj pokoju, etapu lub wpisz akcję..."
             className="w-full bg-transparent text-sm sm:text-base text-white placeholder-slate-400 focus:outline-hidden"
           />
           {query ? (
             <button
-              onClick={() => setQuery('')}
+              onClick={() => {
+                setQuery('');
+                setSelectedIndex(0);
+              }}
               className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition"
               aria-label="Wyczyść zapytanie"
             >
@@ -477,7 +490,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             </div>
           ) : (
             filteredItems.map((item, index) => {
-              const isSelected = index === selectedIndex;
+              const isSelected = index === safeSelectedIndex;
               return (
                 <div
                   key={item.id}

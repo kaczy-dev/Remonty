@@ -45,12 +45,20 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
   onSaveToProject,
   roomName = 'Pokój',
 }) => {
+  const [prevInitialPhotoUrl, setPrevInitialPhotoUrl] = useState(initialPhotoUrl);
   const [photoUrl, setPhotoUrl] = useState<string | null>(initialPhotoUrl || null);
   const [activeTool, setActiveTool] = useState<'dimension' | 'pin' | 'select'>('dimension');
   const [selectedPinType, setSelectedPinType] = useState<PinType>('socket_230v');
   const [dimensions, setDimensions] = useState<DimensionLine[]>([]);
   const [pins, setPins] = useState<InstallationPin[]>([]);
   const [history, setHistory] = useState<Array<{ dimensions: DimensionLine[]; pins: InstallationPin[] }>>([]);
+
+  if (initialPhotoUrl !== prevInitialPhotoUrl) {
+    setPrevInitialPhotoUrl(initialPhotoUrl);
+    if (initialPhotoUrl) {
+      setPhotoUrl(initialPhotoUrl);
+    }
+  }
 
   // Rysowanie nowej linii
   const [isDrawing, setIsDrawing] = useState(false);
@@ -70,12 +78,6 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    if (initialPhotoUrl) {
-      setPhotoUrl(initialPhotoUrl);
-    }
-  }, [initialPhotoUrl]);
 
   // Zapisz stan do historii przed modyfikacją
   const pushHistory = useCallback(() => {
@@ -167,7 +169,7 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
   }, [redrawCanvas]);
 
   // Dopasowanie rozmiaru Canvas do załadowanego obrazka
-  const handleImageLoad = () => {
+  const handleImageLoad = useCallback(() => {
     const img = imageRef.current;
     const canvas = canvasRef.current;
     if (img && canvas) {
@@ -175,7 +177,7 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
       canvas.height = img.clientHeight;
       redrawCanvas();
     }
-  };
+  }, [redrawCanvas]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -183,7 +185,7 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [handleImageLoad]);
 
   // Obliczenie znormalizowanych współrzędnych kliknięcia (0..1)
   const getNormalizedCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {

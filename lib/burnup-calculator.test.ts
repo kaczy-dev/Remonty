@@ -28,6 +28,7 @@ describe('Budget Burn-up and S-Curve Calculator', () => {
           category: 'Materiały budowlane' as const,
           date: '2026-09-10',
           paid: true,
+          paymentMethod: 'Gotówka' as const,
         },
       ],
     };
@@ -51,6 +52,7 @@ describe('Budget Burn-up and S-Curve Calculator', () => {
           category: 'Materiały budowlane' as const,
           date: '2026-09-15',
           paid: true,
+          paymentMethod: 'Gotówka' as const,
         },
       ],
     };
@@ -73,6 +75,7 @@ describe('Budget Burn-up and S-Curve Calculator', () => {
           category: 'Wykończenie i dekoracje' as const,
           date: '2026-09-15',
           paid: true,
+          paymentMethod: 'Gotówka' as const,
         },
       ],
     };

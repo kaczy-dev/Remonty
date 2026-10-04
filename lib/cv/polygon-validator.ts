@@ -117,3 +117,173 @@ export function validatePolygonGeometry(vertices: Point2D[]): PolygonValidationR
     isSelfIntersecting: false,
   };
 }
+
+export interface OrthogonalSnapResult {
+  point: Point2D;
+  isSnapped: boolean;
+  snapAngleDeg?: number;
+  guideAxis?: 'horizontal' | 'vertical' | 'diagonal_45' | 'diagonal_135';
+}
+
+/**
+ * Przyciąga ruchomy punkt do osi ortogonalnych (0°, 90°, 180°, 270°) oraz przekątnych (45°, 135°, 225°, 315°)
+ * względem punktu bazowego/kotwicy (anchor). Przydatne przy trasowaniu ścian pod kątem prostym w CAD.
+ */
+export function snapPointToOrtho(
+  currentPoint: Point2D,
+  anchorPoint: Point2D,
+  snapToleranceDeg: number = 4.5
+): OrthogonalSnapResult {
+  const dx = currentPoint.x - anchorPoint.x;
+  const dy = currentPoint.y - anchorPoint.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < 1e-4) {
+    return { point: { ...currentPoint }, isSnapped: false };
+  }
+
+  const angleRad = Math.atan2(dy, dx);
+  let angleDeg = (angleRad * 180) / Math.PI;
+  if (angleDeg < 0) angleDeg += 360;
+
+  const targetAngles = [
+    { deg: 0, axis: 'horizontal' as const },
+    { deg: 45, axis: 'diagonal_45' as const },
+    { deg: 90, axis: 'vertical' as const },
+    { deg: 135, axis: 'diagonal_135' as const },
+    { deg: 180, axis: 'horizontal' as const },
+    { deg: 225, axis: 'diagonal_45' as const },
+    { deg: 270, axis: 'vertical' as const },
+    { deg: 315, axis: 'diagonal_135' as const },
+    { deg: 360, axis: 'horizontal' as const },
+  ];
+
+  for (const target of targetAngles) {
+    const diff = Math.abs(angleDeg - target.deg);
+    if (diff <= snapToleranceDeg) {
+      const snappedRad = (target.deg * Math.PI) / 180;
+      let snapX = anchorPoint.x + dist * Math.cos(snappedRad);
+      let snapY = anchorPoint.y + dist * Math.sin(snappedRad);
+
+      if (target.axis === 'horizontal') {
+        snapY = anchorPoint.y;
+      } else if (target.axis === 'vertical') {
+        snapX = anchorPoint.x;
+      }
+
+      return {
+        point: {
+          x: Math.round(snapX * 100) / 100,
+          y: Math.round(snapY * 100) / 100,
+        },
+        isSnapped: true,
+        snapAngleDeg: target.deg % 360,
+        guideAxis: target.axis,
+      };
+    }
+  }
+
+  return {
+    point: { ...currentPoint },
+    isSnapped: false,
+  };
+}
+
+export interface CornerAngleResult {
+  vertexIndex: number;
+  angleDeg: number;
+  isRightAngle: boolean;
+}
+
+/**
+ * Oblicza kąty przy wszystkich wierzchołkach wielokąta i sprawdza czy są prostokątne (90° ± tolerancja).
+ */
+export function calculatePolygonCornerAngles(
+  vertices: Point2D[],
+  rightAngleToleranceDeg: number = 2.5
+): CornerAngleResult[] {
+  const n = vertices.length;
+  if (n < 3) return [];
+
+  const results: CornerAngleResult[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prev = vertices[(i - 1 + n) % n];
+    const curr = vertices[i];
+    const next = vertices[(i + 1) % n];
+
+    const v1x = prev.x - curr.x;
+    const v1y = prev.y - curr.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+
+    const len1 = Math.hypot(v1x, v1y);
+    const len2 = Math.hypot(v2x, v2y);
+
+    if (len1 < 1e-6 || len2 < 1e-6) {
+      results.push({ vertexIndex: i, angleDeg: 180, isRightAngle: false });
+      continue;
+    }
+
+    const dot = v1x * v2x + v1y * v2y;
+    const cross = v1x * v2y - v1y * v2x;
+
+    const rad = Math.atan2(Math.abs(cross), dot);
+    const deg = (rad * 180) / Math.PI;
+
+    const isRightAngle = Math.abs(deg - 90) <= rightAngleToleranceDeg;
+
+    results.push({
+      vertexIndex: i,
+      angleDeg: Math.round(deg * 10) / 10,
+      isRightAngle,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Automatyczne "prostowanie" narożników wielokąta:
+ * Jeśli kąt narożnika różni się od 90° o mniej niż toleranceDeg,
+ * koryguje wierzchołek, aby utworzyć idealny kąt prosty (90°).
+ */
+export function autoSquarePolygon(
+  vertices: Point2D[],
+  toleranceDeg: number = 3.5
+): Point2D[] {
+  if (vertices.length < 3) return vertices;
+
+  const squared: Point2D[] = vertices.map((p) => ({ ...p }));
+  const n = squared.length;
+
+  for (let i = 0; i < n; i++) {
+    const prev = squared[(i - 1 + n) % n];
+    const curr = squared[i];
+    const next = squared[(i + 1) % n];
+
+    const v1x = prev.x - curr.x;
+    const v1y = prev.y - curr.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+
+    const dot = v1x * v2x + v1y * v2y;
+    const cross = v1x * v2y - v1y * v2x;
+    const deg = (Math.atan2(Math.abs(cross), dot) * 180) / Math.PI;
+
+    if (Math.abs(deg - 90) <= toleranceDeg && Math.abs(deg - 90) > 1e-3) {
+      const isHorizontal = Math.abs(curr.y - prev.y) < Math.abs(curr.x - prev.x);
+      if (isHorizontal) {
+        curr.y = prev.y;
+      } else {
+        curr.x = prev.x;
+      }
+    }
+  }
+
+  if (validatePolygonGeometry(squared).isValid) {
+    return squared;
+  }
+
+  return vertices;
+}

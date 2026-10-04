@@ -20,6 +20,8 @@ export interface AtticMetrics {
   kneeWallAreaM2: number; // powierzchnia ścianki kolankowej
   usableFloorAreaM2: number; // powierzchnia użytkowa wg standardu podatkowego (100% dla h>=2.2m, 50% dla 1.4-2.2m)
   usableFloorAreaArchitecturalM2?: number; // powierzchnia użytkowa architektoniczna (h >= 1.90m wg PN-ISO 9836)
+  netVolumeM3: number; // kubatura netto pomieszczenia poddasza V_netto (m3) do doboru HVAC / wentylacji
+  ventilationDemandM3PerHour: number; // zalecana krotność wymiany powietrza (0.5 wymiany/h wg PN-83/B-03430)
   slopeLengthM: number; // długość połaci po skosie
   slopeRunFloorM: number; // rzut poziomy skosu na posadzkę
   fullHeightCeilingWidthM: number; // szerokość płaskiego sufitu na pełnej wysokości
@@ -35,6 +37,7 @@ export function calculateAtticMetrics(
   atticConfig?: RoomAtticRoof
 ): AtticMetrics {
   const nominalFloorArea = roomWidthM * roomLengthM;
+  const standardVolume = Math.round(nominalFloorArea * roomHeightM * 100) / 100;
 
   if (!atticConfig || !atticConfig.isAttic) {
     return {
@@ -43,6 +46,8 @@ export function calculateAtticMetrics(
       kneeWallAreaM2: 0,
       usableFloorAreaM2: nominalFloorArea,
       usableFloorAreaArchitecturalM2: nominalFloorArea,
+      netVolumeM3: standardVolume,
+      ventilationDemandM3PerHour: Math.round(standardVolume * 0.5 * 10) / 10,
       slopeLengthM: 0,
       slopeRunFloorM: 0,
       fullHeightCeilingWidthM: roomWidthM,
@@ -104,14 +109,48 @@ export function calculateAtticMetrics(
     usableAreaArchitectural = Math.max(0, nominalFloorArea - zoneBelow190Area);
   }
 
+  // Obliczenie kubatury netto poddasza (V_netto) do doboru grzejników i wentylacji
+  const crossSectionArea =
+    kneeH * crossDimension + ((crossDimension + flatCeilingSpan) * deltaH) / 2;
+  const netVolumeM3 = Math.round(crossSectionArea * alongWallLength * 100) / 100;
+  const ventilationDemandM3PerHour = Math.round(netVolumeM3 * 0.5 * 10) / 10;
+
   return {
     isAttic: true,
     slopeAreaM2,
     kneeWallAreaM2,
     usableFloorAreaM2: Math.round(usableAreaTax * 100) / 100,
     usableFloorAreaArchitecturalM2: Math.round(usableAreaArchitectural * 100) / 100,
+    netVolumeM3,
+    ventilationDemandM3PerHour,
     slopeLengthM: Math.round(slopeLength * 100) / 100,
     slopeRunFloorM: Math.round(clampedSlopeRun * 100) / 100,
     fullHeightCeilingWidthM: Math.round(flatCeilingSpan * 100) / 100,
   };
 }
+
+/**
+ * Zwraca obliczoną kubaturę netto poddasza V_netto (m3).
+ */
+export function calculateAtticVolumeNetto(
+  roomWidthM: number,
+  roomLengthM: number,
+  roomHeightM: number,
+  atticConfig?: RoomAtticRoof
+): number {
+  return calculateAtticMetrics(roomWidthM, roomLengthM, roomHeightM, atticConfig).netVolumeM3;
+}
+
+/**
+ * Oblicza zapotrzebowanie wentylacyjne (m3/h) wg normy PN-83/B-03430.
+ */
+export function calculateAtticVentilationDemand(
+  volumeNettoM3: number,
+  airChangesPerHour: number = 0.5
+): { airChangesPerHour: number; ventilationDemandM3PerHour: number } {
+  return {
+    airChangesPerHour,
+    ventilationDemandM3PerHour: Math.round(volumeNettoM3 * airChangesPerHour * 10) / 10,
+  };
+}
+

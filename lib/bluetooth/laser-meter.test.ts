@@ -128,5 +128,22 @@ describe('Laser Meter Protocol Parsers', () => {
       // In Node environment navigator.bluetooth is undefined
       expect(isWebBluetoothSupported()).toBe(false);
     });
+
+    it('initializes with default reconnection options and false reconnecting state', () => {
+      const client = new BluetoothLaserMeterClient({
+        onMeasurement: vi.fn(),
+        autoReconnect: true,
+        maxReconnectAttempts: 3,
+      });
+
+      expect(client.getConnected()).toBe(false);
+      expect(client.getReconnecting()).toBe(false);
+      expect(client.getDeviceName()).toBeNull();
+
+      // Calling disconnect resets reconnect state
+      client.disconnect();
+      expect(client.getConnected()).toBe(false);
+      expect(client.getReconnecting()).toBe(false);
+    });
   });
 });

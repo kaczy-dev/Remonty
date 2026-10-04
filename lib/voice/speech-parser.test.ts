@@ -147,7 +147,28 @@ describe('Speech Parser (Polish Construction Voice Assistant)', () => {
       expect(door.openingPayload?.height).toBe(2);
     });
 
-    it('parses instant actions (laser, next room, save)', () => {
+    it('parses Polish trade door sizes (osiemdziesiątki, dziewięćdziesiątki)', () => {
+      const d80 = parseVoiceCommand('dodaj drzwi osiemdziesiątki');
+      expect(d80.type).toBe('ADD_OPENING');
+      expect(d80.openingPayload?.type).toBe('door');
+      expect(d80.openingPayload?.width).toBe(0.9);
+      expect(d80.openingPayload?.height).toBe(2.05);
+
+      const d90 = parseVoiceCommand('drzwi dziewięćdziesiątki');
+      expect(d90.type).toBe('ADD_OPENING');
+      expect(d90.openingPayload?.width).toBe(1.0);
+      expect(d90.openingPayload?.height).toBe(2.05);
+    });
+
+    it('parses verbal window and door dimensions ("metr dwadzieścia na metr czterdzieści")', () => {
+      const win = parseVoiceCommand('okno metr dwadzieścia na metr czterdzieści');
+      expect(win.type).toBe('ADD_OPENING');
+      expect(win.openingPayload?.type).toBe('window');
+      expect(win.openingPayload?.width).toBe(1.2);
+      expect(win.openingPayload?.height).toBe(1.4);
+    });
+
+    it('parses instant actions (laser, next room, save, connect, multishot, freeze, torch, square, materials)', () => {
       const laser = parseVoiceCommand('laser');
       expect(laser.type).toBe('TRIGGER_ACTION');
       expect(laser.actionPayload?.action).toBe('laser_measure');
@@ -159,6 +180,30 @@ describe('Speech Parser (Polish Construction Voice Assistant)', () => {
       const save = parseVoiceCommand('zapisz projekt');
       expect(save.type).toBe('TRIGGER_ACTION');
       expect(save.actionPayload?.action).toBe('save');
+
+      const conn = parseVoiceCommand('połącz dalmierz');
+      expect(conn.type).toBe('TRIGGER_ACTION');
+      expect(conn.actionPayload?.action).toBe('laser_connect');
+
+      const multi = parseVoiceCommand('kolejka pomiarów');
+      expect(multi.type).toBe('TRIGGER_ACTION');
+      expect(multi.actionPayload?.action).toBe('laser_multishot');
+
+      const freeze = parseVoiceCommand('zamroź kadr');
+      expect(freeze.type).toBe('TRIGGER_ACTION');
+      expect(freeze.actionPayload?.action).toBe('camera_freeze');
+
+      const torch = parseVoiceCommand('włącz latarkę');
+      expect(torch.type).toBe('TRIGGER_ACTION');
+      expect(torch.actionPayload?.action).toBe('camera_torch');
+
+      const square = parseVoiceCommand('wyprostuj kąty');
+      expect(square.type).toBe('TRIGGER_ACTION');
+      expect(square.actionPayload?.action).toBe('auto_square');
+
+      const mat = parseVoiceCommand('ile farby');
+      expect(mat.type).toBe('TRIGGER_ACTION');
+      expect(mat.actionPayload?.action).toBe('calculate_materials');
     });
 
     it('parses notes and defects', () => {

@@ -3,6 +3,8 @@ import {
   CALIBRATION_PRESETS,
   calculateCalibratedScale,
   applyPitchTiltCorrection,
+  evaluateCameraLevelness,
+  applyPerspectiveCompensation2D,
 } from './scale-calibration';
 import { analyzeFrameLighting } from './cv/canny-edge-detector';
 
@@ -165,5 +167,54 @@ describe('scale-calibration utility', () => {
     expect(normalAnalysis.averageLuminance).toBeGreaterThanOrEqual(40);
     expect(normalAnalysis.condition).toBe('good');
   });
+
+  describe('evaluateCameraLevelness', () => {
+    it('reports perfect levelness when pitch and roll are within ±1.5 degrees', () => {
+      const res = evaluateCameraLevelness(90.8, -0.9, 'wall');
+      expect(res.isLevel).toBe(true);
+      expect(res.status).toBe('perfect');
+      expect(res.pitchDeviationDeg).toBe(0.8);
+      expect(res.rollDeviationDeg).toBe(0.9);
+      expect(res.guidanceMessage).toContain('idealnym pionie');
+    });
+
+    it('reports acceptable levelness when deviations are between 1.5 and 5.0 degrees', () => {
+      const res = evaluateCameraLevelness(86.5, 3.2, 'wall');
+      expect(res.isLevel).toBe(true);
+      expect(res.status).toBe('acceptable');
+      expect(res.guidanceMessage).toContain('Dopuszczalne pochylenie');
+    });
+
+    it('flags tilted camera and gives directional corrective guidance when deviations > 5 degrees', () => {
+      const res = evaluateCameraLevelness(82.0, 8.5, 'wall');
+      expect(res.isLevel).toBe(false);
+      expect(res.status).toBe('tilted');
+      expect(res.guidanceMessage).toContain('Pochyl telefon w przód');
+      expect(res.guidanceMessage).toContain('Przechyl w lewo');
+    });
+
+    it('handles null orientation gracefully', () => {
+      const res = evaluateCameraLevelness(null, null);
+      expect(res.isLevel).toBe(true);
+      expect(res.status).toBe('acceptable');
+    });
+  });
+
+  describe('applyPerspectiveCompensation2D', () => {
+    it('accurately calculates 2D perspective corrected distance', () => {
+      // 3m horizontal, 4m vertical -> ideal 5m when level
+      const levelRes = applyPerspectiveCompensation2D(3.0, 4.0, 90, 0, 'wall');
+      expect(levelRes.correctedDxM).toBe(3.0);
+      expect(levelRes.correctedDyM).toBe(4.0);
+      expect(levelRes.distanceM).toBe(5.0);
+
+      // With 30 deg pitch tilt (cos 30 = ~0.866)
+      const tiltedRes = applyPerspectiveCompensation2D(3.0, 4.0, 60, 0, 'wall');
+      expect(tiltedRes.correctedDxM).toBe(3.0);
+      expect(tiltedRes.correctedDyM).toBeCloseTo(4.0 / Math.cos((30 * Math.PI) / 180), 2);
+      expect(tiltedRes.distanceM).toBeGreaterThan(5.0);
+    });
+  });
 });
+
 

@@ -5,6 +5,7 @@ import {
   evaluateRule345,
   evaluateCornerHeights,
   formatRoomSummaryForClipboard,
+  evaluatePlasterSquarenessStandard,
 } from './squareness-calculator';
 
 describe('squareness-calculator', () => {
@@ -134,6 +135,30 @@ describe('squareness-calculator', () => {
       expect(text).toContain('Salon: 4.80m x 5.90m, H=2.65m | Pow. podłogi: 28.32m², Obwód: 21.40m, Pow. ścian netto: 51.2m²');
       expect(text).toContain('Otwory ścienne: 2 szt. (-5.50 m² stolarki)');
       expect(text).toContain('Przekątne: D1=7.61m, D2=7.62m, Δ=10mm');
+    });
+  });
+
+  describe('evaluatePlasterSquarenessStandard (PN-B-10100)', () => {
+    it('evaluates Category III (fine plaster/gładź) conforming when <= 2mm/m and <= 3mm total', () => {
+      const res = evaluatePlasterSquarenessStandard(2, 4.0, 'kat_III');
+      expect(res.isConforming).toBe(true);
+      expect(res.actualDeviationMm).toBe(2);
+      expect(res.maxDeviationOnEntireLengthMm).toBe(3);
+      expect(res.notesPl).toContain('mieści się w rygorystycznej normie PN-B-10100');
+    });
+
+    it('evaluates Category III non-conforming when deviation exceeds 3mm total', () => {
+      const res = evaluatePlasterSquarenessStandard(7, 4.0, 'kat_III');
+      expect(res.isConforming).toBe(false);
+      expect(res.notesPl).toContain('przekracza dopuszczalny limit 3 mm');
+    });
+
+    it('evaluates Category I and II appropriately', () => {
+      const resCatI = evaluatePlasterSquarenessStandard(8, 3.0, 'kat_I');
+      expect(resCatI.isConforming).toBe(true); // <= 10mm total and <= 6mm/m
+
+      const resCatII = evaluatePlasterSquarenessStandard(8, 3.0, 'kat_II');
+      expect(resCatII.isConforming).toBe(false); // > 6mm total
     });
   });
 });

@@ -446,6 +446,130 @@ describe('ViewRoomScanMeasure Component', () => {
       mockRoom.polygonVertices
     );
   });
+
+  it('toggles Construction Site Mode with high-contrast styling and enlarged buttons', () => {
+    const { container } = render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const siteModeBtn = screen.getByTestId('toggle-site-mode-btn');
+    expect(siteModeBtn).toBeInTheDocument();
+    expect(screen.getByText('Tryb Budowa')).toBeInTheDocument();
+
+    // Toggle Site Mode ON
+    fireEvent.click(siteModeBtn);
+    expect(screen.getByText('Budowa: WŁ (Kontrast)')).toBeInTheDocument();
+    expect(container.querySelector('.site-mode')).toBeInTheDocument();
+
+    // Toggle Site Mode OFF
+    fireEvent.click(siteModeBtn);
+    expect(screen.getByText('Tryb Budowa')).toBeInTheDocument();
+    expect(container.querySelector('.site-mode')).not.toBeInTheDocument();
+  });
+
+  it('evaluates Plaster Standard PN-B-10100 for categories I, II, III in Diagonals Inspector', () => {
+    render(
+      <ViewRoomScanMeasure
+        room={mockRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    const blueprintTabBtn = screen.getByRole('button', { name: /Rzut 2D/i });
+    fireEvent.click(blueprintTabBtn);
+
+    // Enter minor skew diagonals: ideal is ~6.403m
+    const d1Input = screen.getByTestId('input-diagonal-d1');
+    const d2Input = screen.getByTestId('input-diagonal-d2');
+    fireEvent.change(d1Input, { target: { value: '6.400' } });
+    fireEvent.change(d2Input, { target: { value: '6.410' } });
+
+    // Plaster standard assessment box should be present
+    expect(screen.getByTestId('plaster-assessment-box')).toBeInTheDocument();
+    expect(screen.getByText(/Norma Tynkarska PN-B-10100/i)).toBeInTheDocument();
+
+    // Switch between categories Kat. I, Kat. II, Kat. III
+    const kat1Btn = screen.getByRole('button', { name: /^Kat\.\s*I$/i });
+    const kat2Btn = screen.getByRole('button', { name: /^Kat\.\s*II$/i });
+    const kat3Btn = screen.getByRole('button', { name: /^Kat\.\s*III$/i });
+
+    fireEvent.click(kat1Btn);
+    expect(screen.getAllByText(/Kategoria I/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(kat2Btn);
+    expect(screen.getAllByText(/Kategoria II/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(kat3Btn);
+    expect(screen.getAllByText(/Kategoria III/i).length).toBeGreaterThan(0);
+  });
+
+  it('renders attic netto volume and ventilation demand according to PN-83/B-03430', () => {
+    const atticRoom: Room = {
+      ...mockRoom,
+      atticRoof: {
+        isAttic: true,
+        kneeWallHeightM: 1.0,
+        roofPitchDeg: 45,
+        slopeWall: 'both_sides',
+        hasSkylight: false,
+      },
+    };
+
+    render(
+      <ViewRoomScanMeasure
+        room={atticRoom}
+        onUpdateRoomDimensions={vi.fn()}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Kubatura netto poddasza/i)).toBeInTheDocument();
+    expect(screen.getByText(/Wentylacja \(PN-83\/B-03430\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/0\.5 wymiany kubatury \/ h/i)).toBeInTheDocument();
+  });
+
+  it('handles voice action triggers for laser modal and auto square', () => {
+    const onUpdateRoomDimensionsMock = vi.fn();
+    const roomWithPoly: Room = {
+      ...mockRoom,
+      polygonVertices: [
+        { x: 0, y: 0 },
+        { x: 4.02, y: 0.05 },
+        { x: 4.0, y: 5.0 },
+        { x: 0, y: 5.0 },
+      ],
+    };
+
+    render(
+      <ViewRoomScanMeasure
+        room={roomWithPoly}
+        onUpdateRoomDimensions={onUpdateRoomDimensionsMock}
+        onAddFurniture={vi.fn()}
+        onAddOutlet={vi.fn()}
+      />
+    );
+
+    // Open voice modal and trigger 'wyrównaj kąty' (auto_square)
+    const voiceBtn = screen.getByTestId('open-voice-modal-btn');
+    fireEvent.click(voiceBtn);
+
+    const input = screen.getByPlaceholderText(/Wpisz komendę/i);
+    const submitBtn = screen.getByText('Wyślij');
+    fireEvent.change(input, { target: { value: 'wyrównaj kąty' } });
+    fireEvent.click(submitBtn);
+
+    // Should call onUpdateRoomDimensions with squared polygon
+    expect(onUpdateRoomDimensionsMock).toHaveBeenCalled();
+  });
 });
+
 
 

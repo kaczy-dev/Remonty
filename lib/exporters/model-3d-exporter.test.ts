@@ -172,8 +172,9 @@ describe('model-3d-exporter', () => {
 
       expect(clickSpy).toHaveBeenCalled();
       expect(createdLink).not.toBeNull();
-      expect(createdLink?.getAttribute('rel')).toBe('ar');
-      expect(createdLink?.querySelector('img')).not.toBeNull();
+      const anchor = createdLink as unknown as HTMLAnchorElement;
+      expect(anchor.getAttribute('rel')).toBe('ar');
+      expect(anchor.querySelector('img')).not.toBeNull();
     });
   });
 });

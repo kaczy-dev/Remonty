@@ -8,20 +8,14 @@ export interface UseWakeLockReturn {
   release: () => Promise<void>;
   toggle: () => Promise<boolean>;
 }
-
+ 
 export function useWakeLock(): UseWakeLockReturn {
-  const [isSupported, setIsSupported] = useState<boolean>(false);
+  const [isSupported] = useState<boolean>(() => typeof window !== 'undefined' && 'wakeLock' in navigator);
   const [isActive, setIsActive] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const sentinelRef = useRef<WakeLockSentinel | null>(null);
   const shouldBeLockedRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'wakeLock' in navigator) {
-      setIsSupported(true);
-    }
-  }, []);
 
   const release = useCallback(async () => {
     shouldBeLockedRef.current = false;

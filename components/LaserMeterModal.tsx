@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Bluetooth,
   Radio,
-  Wifi,
   WifiOff,
   Zap,
   Volume2,
+  VolumeX,
   Vibrate,
   CheckCircle2,
   AlertTriangle,
   X,
   Target,
   HelpCircle,
+  ListOrdered,
+  RotateCcw,
 } from 'lucide-react';
 import { useLaserMeter, LaserMeterStatus } from '@/hooks/useLaserMeter';
 
@@ -30,37 +32,45 @@ export const LaserMeterModal: React.FC<LaserMeterModalProps> = ({
   currentTargetField = 'length',
   onSelectTargetField,
 }) => {
+  const [prevTargetField, setPrevTargetField] = useState(currentTargetField);
   const [selectedField, setSelectedField] = useState<string>(currentTargetField || 'length');
   const [enableSound, setEnableSound] = useState(true);
   const [enableHaptic, setEnableHaptic] = useState(true);
+
+  if (currentTargetField !== prevTargetField) {
+    setPrevTargetField(currentTargetField);
+    setSelectedField(currentTargetField || 'length');
+  }
 
   const {
     status,
     deviceName,
     lastMeasurement,
     errorMessage,
-    isSupported,
+    multiShotEnabled,
+    multiShotSequence,
+    multiShotIndex,
+    isMultiShotComplete,
     setTargetField,
+    setMultiShotEnabled,
+    resetMultiShot,
     connect,
     disconnect,
     startSimulation,
     simulateShot,
   } = useLaserMeter({
     defaultTargetField: selectedField,
+    enableSound,
+    enableHaptic,
+    autoReconnect: true,
     onMeasurementReceived: (dist, field) => {
       const target = field || selectedField;
+      setSelectedField(target);
       if (onApplyMeasurement) {
         onApplyMeasurement(dist, target);
       }
     },
   });
-
-  useEffect(() => {
-    if (currentTargetField && currentTargetField !== selectedField) {
-      setSelectedField(currentTargetField);
-      setTargetField(currentTargetField);
-    }
-  }, [currentTargetField, setTargetField]);
 
   if (!isOpen) return null;
 
@@ -78,6 +88,12 @@ export const LaserMeterModal: React.FC<LaserMeterModalProps> = ({
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse">
             <Radio className="w-3.5 h-3.5" /> Połączono ({deviceName})
+          </span>
+        );
+      case 'reconnecting':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+            <Radio className="w-3.5 h-3.5 animate-spin" /> Wznawianie BLE...
           </span>
         );
       case 'simulated':
@@ -163,11 +179,115 @@ export const LaserMeterModal: React.FC<LaserMeterModalProps> = ({
             )}
           </div>
 
+          {/* Przełączniki sprzężenia zwrotnego i trybu serii */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-950/70 border border-slate-800 rounded-2xl">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEnableSound((v) => !v)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer ${
+                  enableSound
+                    ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                    : 'bg-slate-900 text-slate-500 border-slate-800'
+                }`}
+                title="Sygnał dźwiękowy po odebraniu pomiaru"
+              >
+                {enableSound ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                <span>Dźwięk</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEnableHaptic((v) => !v)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer ${
+                  enableHaptic
+                    ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                    : 'bg-slate-900 text-slate-500 border-slate-800'
+                }`}
+                title="Wibracja telefonu po odebraniu pomiaru"
+              >
+                <Vibrate className="w-3.5 h-3.5" />
+                <span>Wibracja</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !multiShotEnabled;
+                setMultiShotEnabled(next);
+                if (next) resetMultiShot();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer shadow-xs ${
+                multiShotEnabled
+                  ? 'bg-teal-600 text-white border-teal-400'
+                  : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>Tryb Serii (Auto-Kolejka)</span>
+            </button>
+          </div>
+
+          {/* Stepper kolejki serii wielopomiarowej */}
+          {multiShotEnabled && (
+            <div className="p-3.5 bg-teal-950/30 border border-teal-500/30 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-teal-300 flex items-center gap-1.5">
+                  <ListOrdered className="w-4 h-4 text-teal-400" />
+                  Kolejka Pomiarowa: Krok {Math.min(multiShotIndex + 1, multiShotSequence.length)} z {multiShotSequence.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetMultiShot}
+                  className="flex items-center gap-1 text-[11px] text-teal-400 hover:text-teal-200 transition cursor-pointer font-medium"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Resetuj serię
+                </button>
+              </div>
+
+              {/* Kroki kolejki */}
+              <div className="grid grid-cols-5 gap-1.5 pt-1">
+                {[
+                  { id: 'length', label: 'Długość' },
+                  { id: 'width', label: 'Szerokość' },
+                  { id: 'height', label: 'Wysokość' },
+                  { id: 'd1', label: 'Przekątna 1' },
+                  { id: 'd2', label: 'Przekątna 2' },
+                ].map((step, idx) => {
+                  const isCurrent = multiShotIndex === idx;
+                  const isDone = multiShotIndex > idx;
+                  return (
+                    <div
+                      key={step.id}
+                      className={`p-2 rounded-xl text-center border transition flex flex-col items-center justify-center min-h-[48px] ${
+                        isCurrent
+                          ? 'bg-teal-500/30 border-teal-400 text-teal-200 font-bold shadow-xs'
+                          : isDone
+                          ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                          : 'bg-slate-950 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <span className="text-[10px] leading-tight">
+                        {isDone ? '✓ ' : `${idx + 1}. `}{step.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                Klikaj przycisk pomiaru na dalmierzu — kolejne strzały automatycznie uzupełniają wymiary pokoju!
+              </p>
+            </div>
+          )}
+
           {/* Cel pomiarowy - gdzie ma trafiać wartość */}
           <div>
             <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Target className="w-4 h-4 text-teal-400" />
-              Wprowadź pomiar do pola:
+              {multiShotEnabled ? 'Aktywne pole docelowe:' : 'Wprowadź pomiar do pola:'}
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {[
@@ -185,7 +305,7 @@ export const LaserMeterModal: React.FC<LaserMeterModalProps> = ({
                     onClick={() => handleFieldChange(f.id)}
                     className={`px-3 py-2.5 rounded-xl text-xs font-semibold transition border text-left flex items-center justify-between ${
                       isActive
-                        ? 'bg-teal-500/20 border-teal-500 text-teal-300 shadow-sm shadow-teal-500/20'
+                        ? 'bg-teal-500/20 border-teal-500 text-teal-300 shadow-xs shadow-teal-500/20'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                     }`}
                   >

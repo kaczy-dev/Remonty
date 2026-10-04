@@ -38,8 +38,21 @@ export interface AddNotePayload {
   isDefect: boolean;
 }
 
+export type TriggerActionType =
+  | 'laser_measure'
+  | 'laser_connect'
+  | 'laser_multishot'
+  | 'camera_freeze'
+  | 'camera_torch'
+  | 'auto_square'
+  | 'calculate_materials'
+  | 'next_room'
+  | 'prev_room'
+  | 'save'
+  | 'cancel';
+
 export interface TriggerActionPayload {
-  action: 'laser_measure' | 'next_room' | 'prev_room' | 'save' | 'cancel';
+  action: TriggerActionType;
   actionLabel: string;
 }
 
@@ -263,20 +276,27 @@ export function extractDimensionMeters(text: string): number | null {
     if (num !== null) return num;
   }
 
-  // Słowne polskie metry i centymetry (np. "trzy metry czterdzieści")
+  // Słowne polskie metry i centymetry (np. "trzy metry czterdzieści", "metr dwadzieścia")
   const words = norm.split(/\s+/);
   const meterWordIdx = words.findIndex((w) => /^metr/i.test(w) || w === 'm');
-  if (meterWordIdx > 0) {
-    const beforeMeterWords = words.slice(0, meterWordIdx);
-    const afterMeterWords = words.slice(meterWordIdx + 1).filter(
-      (w) => !/^centymetr/i.test(w) && w !== 'cm' && w !== 'i'
-    );
-    const mVal = parsePolishWordsToNumber(beforeMeterWords);
+  if (meterWordIdx >= 0) {
+    let mVal: number | null = null;
+    if (meterWordIdx === 0) {
+      mVal = 1;
+    } else {
+      const beforeMeterWords = words.slice(0, meterWordIdx);
+      mVal = parsePolishWordsToNumber(beforeMeterWords);
+    }
+
     if (mVal !== null) {
+      const afterMeterWords = words.slice(meterWordIdx + 1).filter(
+        (w) => !/^centymetr/i.test(w) && w !== 'cm' && w !== 'i'
+      );
       if (afterMeterWords.length > 0) {
         const cmVal = parsePolishWordsToNumber(afterMeterWords);
         if (cmVal !== null) {
-          return parseFloat((mVal + cmVal / 100).toFixed(3));
+          const cmMeters = cmVal < 100 ? cmVal / 100 : cmVal / 1000;
+          return parseFloat((mVal + cmMeters).toFixed(3));
         }
       }
       return mVal;
@@ -389,6 +409,84 @@ export function parseVoiceCommand(transcript: string): VoiceCommandResult {
     };
   }
 
+  if (/(?<=^|\s)(połącz dalmierz|polacz dalmierz|włącz dalmierz|wlacz dalmierz|szukaj dalmierza)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Nawiązywanie połączenia BLE z dalmierzem...',
+      spokenFeedback: 'Łączenie z dalmierzem laserowym.',
+      actionPayload: {
+        action: 'laser_connect',
+        actionLabel: 'Połącz dalmierz BLE',
+      },
+    };
+  }
+
+  if (/(?<=^|\s)(kolejka pomiarów|kolejka pomiarow|tryb serii|seria pomiarowa|resetuj serię|zresetuj serię)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Przełączanie trybu serii pomiarowej...',
+      spokenFeedback: 'Włączono tryb szybkiej serii pomiarowej.',
+      actionPayload: {
+        action: 'laser_multishot',
+        actionLabel: 'Tryb serii pomiarowej',
+      },
+    };
+  }
+
+  if (/(?<=^|\s)(zamroź kadr|zamroz kadr|stopklatka|odmroź kadr|odmroz kadr|wznów kadr)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Przełączanie stopklatki kamery...',
+      spokenFeedback: 'Przełączono stopklatkę.',
+      actionPayload: {
+        action: 'camera_freeze',
+        actionLabel: 'Zamroź / wznów kadr',
+      },
+    };
+  }
+
+  if (/(?<=^|\s)(włącz latarkę|wlacz latarke|wyłącz latarkę|wylacz latarke|latarka)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Przełączanie latarki aparatu...',
+      spokenFeedback: 'Przełączono latarkę.',
+      actionPayload: {
+        action: 'camera_torch',
+        actionLabel: 'Latarka aparatu',
+      },
+    };
+  }
+
+  if (/(?<=^|\s)(wyrównaj kąty|wyrownaj katy|wyprostuj kąty|wyprostuj katy|kąty proste|katy proste|prostuj narożniki)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Wyrównywanie narożników do kątów prostych (90°)...',
+      spokenFeedback: 'Wyrównano kąty wielokąta do dziewięćdziesięciu stopni.',
+      actionPayload: {
+        action: 'auto_square',
+        actionLabel: 'Wyrównaj do kątów 90°',
+      },
+    };
+  }
+
+  if (/(?<=^|\s)(oblicz materiały|oblicz materialy|ile farby|ile tynku|ile gładzi|ile gladzi|zapotrzebowanie)(?=\s|$)/iu.test(norm)) {
+    return {
+      type: 'TRIGGER_ACTION',
+      rawTranscript: transcript,
+      feedbackText: 'Kalkulacja zużycia materiałów...',
+      spokenFeedback: 'Obliczam zapotrzebowanie na materiały.',
+      actionPayload: {
+        action: 'calculate_materials',
+        actionLabel: 'Oblicz materiały',
+      },
+    };
+  }
+
   // 2. Wprowadzanie wymiarów (szerokość, długość, wysokość, przekątna)
   const isWidth = /(?<=^|\s)(szerokość|szerokosc|szer|szeroki|szerokie)(?=\s|:|$)/iu.test(norm);
   const isLength = /(?<=^|\s)(długość|dlugosc|długi|dlugi|długie|dlugie)(?=\s|:|$)/iu.test(norm);
@@ -488,12 +586,53 @@ export function parseVoiceCommand(transcript: string): VoiceCommandResult {
     }
   }
 
-  // 4. Dodawanie otworów ("dodaj okno 120 na 140", "drzwi 90 na 200")
+  // 4. Dodawanie otworów ("dodaj okno 120 na 140", "drzwi osiemdziesiątki", "okno metr dwadzieścia na metr czterdzieści")
   const isWindow = /(?<=^|\s)(okno|okna)(?=\s|$)/iu.test(norm);
   const isDoor = /(?<=^|\s)(drzwi)(?=\s|$)/iu.test(norm);
   if (isWindow || isDoor) {
     const type = isWindow ? 'window' : 'door';
     const typeLabel = isWindow ? 'Okno' : 'Drzwi';
+
+    // Standardowe polskie nazewnictwo skrzydeł drzwiowych na budowie (70, 80, 90, 100)
+    const hasNa = /\bna\b/i.test(norm);
+    if (isDoor && !hasNa) {
+      if (/(?<=^|\s)(siedemdziesiątki|siedemdziesiatki|skrzydło 70|skrzydlo 70)(?=\s|$)/iu.test(norm)) {
+        return {
+          type: 'ADD_OPENING',
+          rawTranscript: transcript,
+          feedbackText: 'Dodano drzwi: 0.80m × 2.05m (skrzydło 70)',
+          spokenFeedback: 'Dodano drzwi siedemdziesiątki o szerokości osiemdziesiąt centymetrów w świetle muru.',
+          openingPayload: { type: 'door', typeLabel: 'Drzwi 70', width: 0.8, height: 2.05 },
+        };
+      }
+      if (/(?<=^|\s)(osiemdziesiątki|osiemdziesiatki|skrzydło 80|skrzydlo 80)(?=\s|$)/iu.test(norm)) {
+        return {
+          type: 'ADD_OPENING',
+          rawTranscript: transcript,
+          feedbackText: 'Dodano drzwi: 0.90m × 2.05m (skrzydło 80)',
+          spokenFeedback: 'Dodano drzwi osiemdziesiątki o szerokości dziewięćdziesiąt centymetrów w świetle muru.',
+          openingPayload: { type: 'door', typeLabel: 'Drzwi 80', width: 0.9, height: 2.05 },
+        };
+      }
+      if (/(?<=^|\s)(dziewięćdziesiątki|dziewiecdziesiatki|skrzydło 90|skrzydlo 90)(?=\s|$)/iu.test(norm)) {
+        return {
+          type: 'ADD_OPENING',
+          rawTranscript: transcript,
+          feedbackText: 'Dodano drzwi: 1.00m × 2.05m (skrzydło 90)',
+          spokenFeedback: 'Dodano drzwi dziewięćdziesiątki o szerokości jeden metr w świetle muru.',
+          openingPayload: { type: 'door', typeLabel: 'Drzwi 90', width: 1.0, height: 2.05 },
+        };
+      }
+      if (/(?<=^|\s)(setki|skrzydło 100|skrzydlo 100)(?=\s|$)/iu.test(norm)) {
+        return {
+          type: 'ADD_OPENING',
+          rawTranscript: transcript,
+          feedbackText: 'Dodano drzwi: 1.10m × 2.05m (skrzydło 100)',
+          spokenFeedback: 'Dodano drzwi setki o szerokości metr dziesięć w świetle muru.',
+          openingPayload: { type: 'door', typeLabel: 'Drzwi 100', width: 1.1, height: 2.05 },
+        };
+      }
+    }
 
     const match = norm.match(/(\d+(?:[.,]\d+)?)\s*(?:cm)?\s*na\s*(\d+(?:[.,]\d+)?)\s*(?:cm)?/i);
     if (match) {
@@ -514,6 +653,30 @@ export function parseVoiceCommand(transcript: string): VoiceCommandResult {
           height: parseFloat(h.toFixed(2)),
         },
       };
+    }
+
+    // Wzorzec słowny: "metr dwadzieścia na metr czterdzieści"
+    const naSplit = norm.split(/\bna\b/i);
+    if (naSplit.length === 2) {
+      const partW = naSplit[0].replace(/(?<=^|\s)(dodaj|okno|okna|drzwi)(?=\s|$)/giu, ' ').trim();
+      const partH = naSplit[1].trim();
+      const parsedW = extractDimensionMeters(partW);
+      const parsedH = extractDimensionMeters(partH);
+
+      if (parsedW !== null && parsedW > 0 && parsedH !== null && parsedH > 0) {
+        return {
+          type: 'ADD_OPENING',
+          rawTranscript: transcript,
+          feedbackText: `Dodano ${typeLabel.toLowerCase()}: ${parsedW.toFixed(2)}m × ${parsedH.toFixed(2)}m`,
+          spokenFeedback: `Dodano ${typeLabel.toLowerCase()} o wymiarach ${parsedW.toFixed(2)} na ${parsedH.toFixed(2)} metra.`,
+          openingPayload: {
+            type,
+            typeLabel,
+            width: parseFloat(parsedW.toFixed(2)),
+            height: parseFloat(parsedH.toFixed(2)),
+          },
+        };
+      }
     }
   }
 

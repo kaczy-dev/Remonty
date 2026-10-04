@@ -282,3 +282,127 @@ export function applyPitchTiltCorrection(
 
   return measuredDyMeters / cosFactor;
 }
+
+export interface CameraLevelnessResult {
+  isLevel: boolean;
+  status: 'perfect' | 'acceptable' | 'tilted';
+  pitchDeviationDeg: number;
+  rollDeviationDeg: number;
+  guidanceMessage: string;
+}
+
+/**
+ * Ocenia wypoziomowanie aparatu telefonu podczas celowania w ścianę lub posadzkę.
+ * Zwraca status wirtualnej poziomnicy bąbelkowej oraz czytelny komunikat dla wykonawcy.
+ */
+export function evaluateCameraLevelness(
+  pitchDeg: number | null,
+  rollDeg: number | null,
+  targetSurface: 'wall' | 'floor' = 'wall'
+): CameraLevelnessResult {
+  if (pitchDeg === null && rollDeg === null) {
+    return {
+      isLevel: true,
+      status: 'acceptable',
+      pitchDeviationDeg: 0,
+      rollDeviationDeg: 0,
+      guidanceMessage: 'Brak odczytu sensorów żyroskopowych',
+    };
+  }
+
+  const nominalPitch = targetSurface === 'wall' ? 90 : 0;
+  const pitchDev = pitchDeg !== null && Number.isFinite(pitchDeg)
+    ? Math.abs(pitchDeg - nominalPitch)
+    : 0;
+  const rollDev = rollDeg !== null && Number.isFinite(rollDeg)
+    ? Math.abs(rollDeg)
+    : 0;
+
+  const roundedPitchDev = Math.round(pitchDev * 10) / 10;
+  const roundedRollDev = Math.round(rollDev * 10) / 10;
+
+  // Progi: <1.5 st = idealny pion/poziom, <5 st = dopuszczalny, >=5 st = ostrzeżenie
+  if (roundedPitchDev <= 1.5 && roundedRollDev <= 1.5) {
+    return {
+      isLevel: true,
+      status: 'perfect',
+      pitchDeviationDeg: roundedPitchDev,
+      rollDeviationDeg: roundedRollDev,
+      guidanceMessage: 'Aparat w idealnym pionie (±1.5°)',
+    };
+  }
+
+  if (roundedPitchDev <= 5.0 && roundedRollDev <= 5.0) {
+    return {
+      isLevel: true,
+      status: 'acceptable',
+      pitchDeviationDeg: roundedPitchDev,
+      rollDeviationDeg: roundedRollDev,
+      guidanceMessage: 'Dopuszczalne pochylenie – aktywna kompensacja',
+    };
+  }
+
+  // Wskazówka kierunkowa
+  const hints: string[] = [];
+  if (pitchDeg !== null && roundedPitchDev > 5.0) {
+    if (pitchDeg < nominalPitch) hints.push(`Pochyl telefon w przód o ${roundedPitchDev}°`);
+    else hints.push(`Pochyl telefon w tył o ${roundedPitchDev}°`);
+  }
+  if (rollDeg !== null && roundedRollDev > 5.0) {
+    if (rollDeg > 0) hints.push(`Przechyl w lewo o ${roundedRollDev}°`);
+    else hints.push(`Przechyl w prawo o ${roundedRollDev}°`);
+  }
+
+  return {
+    isLevel: false,
+    status: 'tilted',
+    pitchDeviationDeg: roundedPitchDev,
+    rollDeviationDeg: roundedRollDev,
+    guidanceMessage: hints.join(', ') || 'Skoryguj ułożenie telefonu',
+  };
+}
+
+/**
+ * 2D Fuzja sensorów: Koryguje wektor odległości (dx, dy) w metrach
+ * uwzględniając jednoczesne nachylenie (Pitch) i przechył boczny (Roll).
+ */
+export function applyPerspectiveCompensation2D(
+  dxMeters: number,
+  dyMeters: number,
+  pitchDeg: number | null,
+  rollDeg: number | null,
+  targetSurface: 'wall' | 'floor' = 'wall'
+): { correctedDxM: number; correctedDyM: number; distanceM: number } {
+  const nominalPitch = targetSurface === 'wall' ? 90 : 0;
+  let correctedDy = dyMeters;
+  let correctedDx = dxMeters;
+
+  // Korekta pionowa (Pitch)
+  if (pitchDeg !== null && Number.isFinite(pitchDeg)) {
+    const pitchDelta = Math.min(60, Math.max(0, Math.abs(pitchDeg - nominalPitch)));
+    if (pitchDelta >= 2.0) {
+      const cosPitch = Math.cos((pitchDelta * Math.PI) / 180);
+      if (cosPitch >= 0.2) {
+        correctedDy = dyMeters / cosPitch;
+      }
+    }
+  }
+
+  // Korekta pozioma (Roll)
+  if (rollDeg !== null && Number.isFinite(rollDeg)) {
+    const rollDelta = Math.min(60, Math.max(0, Math.abs(rollDeg)));
+    if (rollDelta >= 2.0) {
+      const cosRoll = Math.cos((rollDelta * Math.PI) / 180);
+      if (cosRoll >= 0.2) {
+        correctedDx = dxMeters / cosRoll;
+      }
+    }
+  }
+
+  const distance = Math.hypot(correctedDx, correctedDy);
+  return {
+    correctedDxM: Math.round(correctedDx * 1000) / 1000,
+    correctedDyM: Math.round(correctedDy * 1000) / 1000,
+    distanceM: Math.round(distance * 1000) / 1000,
+  };
+}

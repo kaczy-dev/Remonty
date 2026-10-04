@@ -251,6 +251,70 @@ export function evaluateCornerHeights(corners: {
   };
 }
 
+export type PlasterCategoryPN = 'kat_I' | 'kat_II' | 'kat_III';
+
+export interface PlasterDeviationAssessment {
+  category: PlasterCategoryPN;
+  categoryNamePl: string;
+  maxAllowedDeviationPerMeterMm: number;
+  maxDeviationOnEntireLengthMm: number;
+  actualDeviationMm: number;
+  deviationPerMeterMm: number;
+  isConforming: boolean;
+  notesPl: string;
+}
+
+/**
+ * Ocenia dopuszczalne odchyłki kąta prostego i płaszczyzny tynku wg normy PN-B-10100 / PN-EN 13914.
+ * - Kat. I: tynk surowy (odchyłka kąta <= 6 mm/m, max 10 mm na ścianie)
+ * - Kat. II: tynk zwykły (odchyłka kąta <= 4 mm/m, max 6 mm na ścianie)
+ * - Kat. III: tynk doborowy / gładź gipsowa (odchyłka kąta <= 2 mm/m, max 3 mm na ścianie)
+ */
+export function evaluatePlasterSquarenessStandard(
+  differenceMm: number,
+  wallLengthM: number,
+  category: PlasterCategoryPN = 'kat_III'
+): PlasterDeviationAssessment {
+  const length = Math.max(1, wallLengthM);
+  const deviationPerMeter = Math.round((differenceMm / length) * 10) / 10;
+
+  const standards = {
+    kat_I: {
+      name: 'Kategoria I (Tynk surowy)',
+      maxPerMeter: 6,
+      maxTotal: 10,
+    },
+    kat_II: {
+      name: 'Kategoria II (Tynk zwykły / podkładowy)',
+      maxPerMeter: 4,
+      maxTotal: 6,
+    },
+    kat_III: {
+      name: 'Kategoria III (Tynk doborowy / gładź)',
+      maxPerMeter: 2,
+      maxTotal: 3,
+    },
+  }[category];
+
+  const isConforming =
+    deviationPerMeter <= standards.maxPerMeter && differenceMm <= standards.maxTotal;
+
+  const notesPl = isConforming
+    ? `Odchyłka ${differenceMm} mm mieści się w rygorystycznej normie PN-B-10100 dla ${standards.name}.`
+    : `Odchyłka ${differenceMm} mm (${deviationPerMeter} mm/m) przekracza dopuszczalny limit ${standards.maxTotal} mm dla ${standards.name}. Wymagane szpachlowanie wyrównawcze.`;
+
+  return {
+    category,
+    categoryNamePl: standards.name,
+    maxAllowedDeviationPerMeterMm: standards.maxPerMeter,
+    maxDeviationOnEntireLengthMm: standards.maxTotal,
+    actualDeviationMm: differenceMm,
+    deviationPerMeterMm: deviationPerMeter,
+    isConforming,
+    notesPl,
+  };
+}
+
 /**
  * Formatowanie profesjonalnego zestawienia pomiarowego do SMS / WhatsApp dla ekipy budowlanej
  */

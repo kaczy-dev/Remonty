@@ -46,5 +46,10 @@ describe('attic-calculator', () => {
     expect(metrics.kneeWallAreaM2).toBe(10.0); // 2 x 5 m2
     // 2 skosy
     expect(metrics.slopeAreaM2).toBeCloseTo(22.63, 1);
+
+    // Kubatura netto poddasza (V_netto) powinna być mniejsza od standardowej kubatury prostopadłościanu (4x5x2.6 = 52 m3)
+    expect(metrics.netVolumeM3).toBeLessThan(52.0);
+    expect(metrics.netVolumeM3).toBeGreaterThan(30.0);
+    expect(metrics.ventilationDemandM3PerHour).toBeCloseTo(metrics.netVolumeM3 * 0.5, 1);
   });
 });

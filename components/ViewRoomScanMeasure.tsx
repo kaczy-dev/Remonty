@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Room, RoomFurniture, RoomOutlet, RoomOpening, WallPosition, RoomAtticRoof } from '@/types/renovation';
 import {
   Camera,
@@ -24,22 +24,31 @@ import {
   Bluetooth,
   Sparkles,
   Mic,
+  HardHat,
+  ShieldCheck,
 } from 'lucide-react';
 import { Room3DViewer } from '@/components/Room3DViewer';
 import { CameraMeasurementScanner } from '@/components/CameraMeasurementScanner';
 import { LaserMeterModal } from '@/components/LaserMeterModal';
 import { PhotoMarkupModal } from '@/components/PhotoMarkupModal';
 import { VoiceAssistantModal } from '@/components/VoiceAssistantModal';
-import type { VoiceCommandResult } from '@/lib/voice/speech-parser';
+import { playVoiceSoundCue, type VoiceCommandResult } from '@/lib/voice/speech-parser';
 import { savePhotoBlob, usePhotoSrc, LOCAL_PHOTO_PREFIX } from '@/lib/db';
-import { calculateAtticMetrics } from '@/lib/geometry/attic-calculator';
+import {
+  calculateAtticMetrics,
+  calculateAtticVolumeNetto,
+  calculateAtticVentilationDemand,
+} from '@/lib/geometry/attic-calculator';
 import {
   evaluateDiagonals,
   evaluateRule345,
   evaluateCornerHeights,
   calculateIdealDiagonal,
   formatRoomSummaryForClipboard,
+  evaluatePlasterSquarenessStandard,
+  type PlasterCategoryPN,
 } from '@/lib/geometry/squareness-calculator';
+import { autoSquarePolygon } from '@/lib/cv/polygon-validator';
 
 interface ViewRoomScanMeasureProps {
   room: Room;
@@ -113,15 +122,25 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const activePhoto = userPhotoUrl || persistedPhotoSrc;
 
   // Local dimension inputs
+  const [prevRoomDimensions, setPrevRoomDimensions] = useState({
+    w: room.width,
+    l: room.length,
+    h: room.height,
+  });
   const [width, setWidth] = useState(room.width);
   const [length, setLength] = useState(room.length);
   const [height, setHeight] = useState(room.height);
 
-  React.useEffect(() => {
+  if (
+    room.width !== prevRoomDimensions.w ||
+    room.length !== prevRoomDimensions.l ||
+    room.height !== prevRoomDimensions.h
+  ) {
+    setPrevRoomDimensions({ w: room.width, l: room.length, h: room.height });
     setWidth(room.width);
     setLength(room.length);
     setHeight(room.height);
-  }, [room.width, room.length, room.height]);
+  }
 
   // Diagonals & Squareness Inspector state (PN-B-10100)
   const [measuredD1, setMeasuredD1] = useState<string>('');
@@ -148,7 +167,25 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   const [showPhotoMarkupModal, setShowPhotoMarkupModal] = useState<boolean>(false);
   const [showVoiceAssistantModal, setShowVoiceAssistantModal] = useState<boolean>(false);
 
-  const handleLaserMeasurement = (dist: number, target: string) => {
+  // Construction Site Mode (High-contrast outdoor visibility & gloves-friendly hit areas)
+  const [isSiteMode, setIsSiteMode] = useState<boolean>(false);
+
+  // Plaster Category according to PN-B-10100 / PN-EN 13914 ('I' | 'II' | 'III')
+  const [plasterCategory, setPlasterCategory] = useState<'I' | 'II' | 'III'>('III');
+
+  const handleApplyDimensions = useCallback((
+    newW: number,
+    newL: number,
+    newH: number,
+    newPoly?: { x: number; y: number }[]
+  ) => {
+    setWidth(newW);
+    setLength(newL);
+    setHeight(newH);
+    onUpdateRoomDimensions(room.id, newW, newL, newH, newPoly ?? room.polygonVertices);
+  }, [room.id, room.polygonVertices, onUpdateRoomDimensions]);
+
+  const handleLaserMeasurement = useCallback((dist: number, target: string) => {
     if (target === 'width') {
       handleApplyDimensions(dist, length, height);
     } else if (target === 'length') {
@@ -160,9 +197,9 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     } else if (target === 'd2') {
       setMeasuredD2(dist.toFixed(3));
     }
-  };
+  }, [handleApplyDimensions, width, length, height]);
 
-  const handleVoiceCommand = (cmd: VoiceCommandResult) => {
+  const handleVoiceCommand = useCallback((cmd: VoiceCommandResult) => {
     if (cmd.type === 'SET_DIMENSION' && cmd.dimensionPayload) {
       const { target, value } = cmd.dimensionPayload;
       if (target === 'width') {
@@ -180,7 +217,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
       const { type, width: opW, height: opH, typeLabel } = cmd.openingPayload;
       if (onAddOpening) {
         onAddOpening(room.id, {
-          id: `op-${Date.now()}`,
+          id: `op-${Math.random().toString(36).substring(2, 9)}`,
           type,
           name: `${typeLabel} ${opW.toFixed(2)}×${opH.toFixed(2)}m`,
           width: opW,
@@ -190,28 +227,42 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
         });
       }
     } else if (cmd.type === 'TRIGGER_ACTION' && cmd.actionPayload) {
-      if (cmd.actionPayload.action === 'laser_measure') {
+      const act = cmd.actionPayload.action;
+      if (act === 'laser_measure' || act === 'laser_connect' || act === 'laser_multishot') {
         setShowVoiceAssistantModal(false);
         setLaserTargetField('width');
         setShowLaserModal(true);
+      } else if (act === 'camera_freeze' || act === 'camera_torch') {
+        setShowVoiceAssistantModal(false);
+        setActiveTab('camera_grid');
+      } else if (act === 'auto_square') {
+        setShowVoiceAssistantModal(false);
+        if (room.polygonVertices && room.polygonVertices.length >= 3) {
+          const squared = autoSquarePolygon(room.polygonVertices, 4.0);
+          handleApplyDimensions(width, length, height, squared);
+          playVoiceSoundCue('success');
+        } else {
+          setActiveTab('camera_grid');
+        }
+      } else if (act === 'calculate_materials') {
+        setShowVoiceAssistantModal(false);
+        setActiveTab('3d');
       }
     }
-  };
-
-  const handleApplyDimensions = (
-    newW: number,
-    newL: number,
-    newH: number,
-    newPoly?: { x: number; y: number }[]
-  ) => {
-    setWidth(newW);
-    setLength(newL);
-    setHeight(newH);
-    onUpdateRoomDimensions(room.id, newW, newL, newH, newPoly ?? room.polygonVertices);
-  };
+  }, [handleApplyDimensions, width, length, height, onAddOpening, room.id, room.polygonVertices]);
 
   // Quick metric micro-adjustments (+/- 1cm, +/- 5cm) for field readiness with laser meter / gloves
   const adjustDimension = (dim: 'width' | 'length' | 'height', deltaM: number) => {
+    if (isSiteMode) {
+      playVoiceSoundCue('start');
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(25);
+        } catch {
+          // ignore
+        }
+      }
+    }
     if (dim === 'width') {
       const nextW = Math.max(0.5, Math.min(20.0, Math.round((width + deltaM) * 100) / 100));
       handleApplyDimensions(nextW, length, height);
@@ -234,6 +285,8 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
   };
 
   const atticMetrics = calculateAtticMetrics(room.width, room.length, room.height, room.atticRoof);
+  const atticVolumeNettoM3 = calculateAtticVolumeNetto(width, length, height, room.atticRoof);
+  const atticVentilation = calculateAtticVentilationDemand(atticVolumeNettoM3);
 
   // Diagonals & Squareness evaluation (PN-B-10100)
   const numD1 = parseFloat(measuredD1);
@@ -243,6 +296,13 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     length,
     !isNaN(numD1) && numD1 > 0 ? numD1 : undefined,
     !isNaN(numD2) && numD2 > 0 ? numD2 : undefined
+  );
+  const plasterCatKey: PlasterCategoryPN =
+    plasterCategory === 'I' ? 'kat_I' : plasterCategory === 'II' ? 'kat_II' : 'kat_III';
+  const plasterAssessment = evaluatePlasterSquarenessStandard(
+    diagonalResult.differenceMm,
+    Math.max(width, length),
+    plasterCatKey
   );
 
   const numRuleHypo = parseFloat(rule345Hypo);
@@ -490,6 +550,24 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                 <span className="text-[10px] text-slate-400 block">Sufit płaski (h={height.toFixed(2)}m)</span>
                 <strong className="text-sm font-mono text-teal-300">{atticMetrics.fullHeightCeilingWidthM.toFixed(2)} m</strong>
                 <span className="text-[9px] text-slate-500 block">pełna wysokość</span>
+              </div>
+            </div>
+
+            {/* Kubatura netto & Zapotrzebowanie wentylacyjne (PN-83/B-03430) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-semibold">Kubatura netto poddasza V<sub>netto</sub></span>
+                  <span className="text-[9px] text-slate-500">przestrzeń pod skosami i sufitem</span>
+                </div>
+                <span className="text-sm font-mono font-bold text-amber-300">{atticVolumeNettoM3.toFixed(1)} m³</span>
+              </div>
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-semibold">Wentylacja (PN-83/B-03430)</span>
+                  <span className="text-[9px] text-slate-500">0.5 wymiany kubatury / h</span>
+                </div>
+                <span className="text-sm font-mono font-bold text-teal-300">{atticVentilation.ventilationDemandM3PerHour.toFixed(1)} m³/h</span>
               </div>
             </div>
 
@@ -758,6 +836,64 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* Norma Tynkarska PN-B-10100 / PN-EN 13914 */}
+              <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
+                    Norma Tynkarska PN-B-10100:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(['I', 'II', 'III'] as const).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setPlasterCategory(cat)}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded transition border ${
+                          plasterCategory === cat
+                            ? 'bg-teal-600 text-white border-teal-500 shadow-xs'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                        title={
+                          cat === 'I'
+                            ? 'Kat. I: tynk podkładowy (5 mm/m)'
+                            : cat === 'II'
+                            ? 'Kat. II: tynk zwykły jednowarstwowy (4 mm/m)'
+                            : 'Kat. III: tynk gipsowy / standard deweloperski (3 mm/m)'
+                        }
+                      >
+                        Kat. {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  className={`p-2.5 rounded-lg border text-xs flex items-center justify-between gap-3 ${
+                    plasterAssessment.isConforming
+                      ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200'
+                      : 'bg-rose-950/40 border-rose-500/30 text-rose-200'
+                  }`}
+                  data-testid="plaster-assessment-box"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <span className={`inline-block w-2 h-2 rounded-full ${plasterAssessment.isConforming ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <span>{plasterAssessment.categoryNamePl}: {plasterAssessment.isConforming ? 'Zgodne z normą' : 'Przekroczenie normy'}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 opacity-90">{plasterAssessment.notesPl}</p>
+                  </div>
+                  <div className="text-right shrink-0 font-mono text-[11px]">
+                    <span className="block font-bold">
+                      {plasterAssessment.deviationPerMeterMm} mm/m
+                    </span>
+                    <span className="text-[9px] text-slate-400">
+                      limit ≤ {plasterAssessment.maxAllowedDeviationPerMeterMm} mm/m
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1281,8 +1417,25 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
     </div>
   );
 
+  const getMicroAdjustBtnClass = (isPositive: boolean) => {
+    if (isSiteMode) {
+      return isPositive
+        ? 'px-3 py-2 text-xs font-mono font-black min-h-[44px] min-w-[46px] rounded-lg bg-teal-950 text-teal-300 border-2 border-teal-400 hover:bg-teal-900 active:scale-95 transition'
+        : 'px-3 py-2 text-xs font-mono font-black min-h-[44px] min-w-[46px] rounded-lg bg-slate-900 text-amber-300 border-2 border-amber-400 hover:bg-slate-800 active:scale-95 transition';
+    }
+    return isPositive
+      ? 'px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition'
+      : 'px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition';
+  };
+
   return (
-    <div className="space-y-6">
+    <div
+      className={`space-y-6 transition-colors duration-200 ${
+        isSiteMode
+          ? 'site-mode bg-black text-amber-50 p-2 sm:p-4 rounded-3xl border-2 border-amber-500/80 shadow-[0_0_50px_rgba(245,158,11,0.2)]'
+          : ''
+      }`}
+    >
       
       {/* Top Controller: Mode Tabs & Room Quick Stats */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
@@ -1409,6 +1562,32 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
               </>
             )}
           </button>
+
+          {/* Construction Site Mode Toggle (High Contrast & Gloves Friendly) */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsSiteMode((prev) => !prev);
+              playVoiceSoundCue('start');
+              if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                try {
+                  navigator.vibrate(30);
+                } catch {
+                  // ignore
+                }
+              }
+            }}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition cursor-pointer shadow-xs active:scale-95 ${
+              isSiteMode
+                ? 'bg-amber-400 text-black border-amber-300 ring-2 ring-amber-400/60 shadow-lg'
+                : 'border-amber-500/40 bg-amber-950/20 text-amber-300 hover:bg-amber-950/50 hover:border-amber-400'
+            }`}
+            title="Tryb Budowa: Maksymalny kontrast pod słońce i powiększone strefy dotyku dla rękawic roboczych"
+            data-testid="toggle-site-mode-btn"
+          >
+            <HardHat className="w-4 h-4 text-inherit" />
+            <span>{isSiteMode ? 'Budowa: WŁ (Kontrast)' : 'Tryb Budowa'}</span>
+          </button>
         </div>
 
         {/* Calculated Room Metrics Badges */}
@@ -1502,7 +1681,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('width', -0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 5 cm"
                   >
                     -5cm
@@ -1510,7 +1689,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('width', -0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 1 cm"
                   >
                     -1cm
@@ -1518,7 +1697,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('width', 0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 1 cm"
                   >
                     +1cm
@@ -1526,7 +1705,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('width', 0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 5 cm"
                   >
                     +5cm
@@ -1576,7 +1755,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('length', -0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 5 cm"
                   >
                     -5cm
@@ -1584,7 +1763,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('length', -0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 1 cm"
                   >
                     -1cm
@@ -1592,7 +1771,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('length', 0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 1 cm"
                   >
                     +1cm
@@ -1600,7 +1779,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('length', 0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 5 cm"
                   >
                     +5cm
@@ -1650,7 +1829,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('height', -0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 5 cm"
                   >
                     -5cm
@@ -1658,7 +1837,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('height', -0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition"
+                    className={getMicroAdjustBtnClass(false)}
                     title="Odejmij 1 cm"
                   >
                     -1cm
@@ -1666,7 +1845,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('height', 0.01)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 1 cm"
                   >
                     +1cm
@@ -1674,7 +1853,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustDimension('height', 0.05)}
-                    className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition"
+                    className={getMicroAdjustBtnClass(true)}
                     title="Dodaj 5 cm"
                   >
                     +5cm
@@ -1792,7 +1971,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('width', -0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 5 cm"
                     >
                       -5cm
@@ -1800,7 +1979,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('width', -0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 1 cm"
                     >
                       -1cm
@@ -1808,7 +1987,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('width', 0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 1 cm"
                     >
                       +1cm
@@ -1816,7 +1995,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('width', 0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 5 cm"
                     >
                       +5cm
@@ -1857,7 +2036,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('length', -0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 5 cm"
                     >
                       -5cm
@@ -1865,7 +2044,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('length', -0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 1 cm"
                     >
                       -1cm
@@ -1873,7 +2052,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('length', 0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 1 cm"
                     >
                       +1cm
@@ -1881,7 +2060,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('length', 0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 5 cm"
                     >
                       +5cm
@@ -1922,7 +2101,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('height', -0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 5 cm"
                     >
                       -5cm
@@ -1930,7 +2109,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('height', -0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 active:scale-95 border border-slate-700 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(false)}
                       title="Odejmij 1 cm"
                     >
                       -1cm
@@ -1938,7 +2117,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('height', 0.01)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 1 cm"
                     >
                       +1cm
@@ -1946,7 +2125,7 @@ export const ViewRoomScanMeasure: React.FC<ViewRoomScanMeasureProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustDimension('height', 0.05)}
-                      className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-teal-950/70 text-teal-300 hover:bg-teal-900 active:scale-95 border border-teal-600/50 transition cursor-pointer"
+                      className={getMicroAdjustBtnClass(true)}
                       title="Dodaj 5 cm"
                     >
                       +5cm

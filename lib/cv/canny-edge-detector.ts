@@ -202,6 +202,23 @@ export function detectEdgesCanny(
 }
 
 /**
+ * Asynchroniczne przetwarzanie krawędzi (nieblokujące wątku renderowania interfejsu)
+ */
+export async function detectEdgesCannyAsync(
+  rgbaData: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  options: CannyOptions = {}
+): Promise<EdgeDetectionResult> {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const res = detectEdgesCanny(rgbaData, width, height, options);
+      resolve(res);
+    }, 0);
+  });
+}
+
+/**
  * Szuka najbliższej wykrytej krawędzi wokół zadanego punktu (% kadru).
  * Zwraca nowe współrzędne z przyciągnięciem, jeśli w promieniu poszukiwania znaleziono krawędź.
  *

@@ -51,7 +51,10 @@ export function useVoiceAssistant({
   continuousDefault = false,
 }: UseVoiceAssistantOptions = {}): UseVoiceAssistantReturn {
   const [isListening, setIsListening] = useState(false);
-  const [isSupported, setIsSupported] = useState(false);
+  const [isSupported] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  });
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [lastCommand, setLastCommand] = useState<VoiceCommandResult | null>(null);
@@ -78,15 +81,6 @@ export function useVoiceAssistant({
   useEffect(() => {
     continuousRef.current = continuousMode;
   }, [continuousMode]);
-
-  // Sprawdzenie dostępności Web Speech API
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognitionClass =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      setIsSupported(Boolean(SpeechRecognitionClass));
-    }
-  }, []);
 
   const handleCommandExecution = useCallback((cmd: VoiceCommandResult) => {
     setLastCommand(cmd);

@@ -34,15 +34,25 @@ import {
 import { MagnifierLoupe } from './MagnifierLoupe';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { ScaleCalibrationModal, AppliedCalibration } from './ScaleCalibrationModal';
-import { applyPitchTiltCorrection } from '@/lib/scale-calibration';
+import {
+  applyPitchTiltCorrection,
+  evaluateCameraLevelness,
+  applyPerspectiveCompensation2D,
+} from '@/lib/scale-calibration';
 import {
   detectEdgesCanny,
+  detectEdgesCannyAsync,
   findNearestEdgePoint,
   EdgeDetectionResult,
   analyzeFrameLighting,
   FrameLightingAnalysis,
 } from '@/lib/cv/canny-edge-detector';
-import { validatePolygonGeometry } from '@/lib/cv/polygon-validator';
+import {
+  validatePolygonGeometry,
+  snapPointToOrtho,
+  calculatePolygonCornerAngles,
+  autoSquarePolygon,
+} from '@/lib/cv/polygon-validator';
 
 interface CameraMeasurementScannerProps {
   roomWidth: number;
@@ -161,6 +171,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
   const [enablePitchCompensation, setEnablePitchCompensation] = useState<boolean>(true);
 
   // Computer Vision (Canny Edge Detection & Edge Snapping)
+  const [streamResolution, setStreamResolution] = useState<string>('1920×1080');
   const [enableAiEdgeAssist, setEnableAiEdgeAssist] = useState<boolean>(true);
   const [edgeDetectionResult, setEdgeDetectionResult] = useState<EdgeDetectionResult | null>(null);
   const [isProcessingEdges, setIsProcessingEdges] = useState<boolean>(false);
@@ -171,11 +182,23 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     return validatePolygonGeometry(polygonPoints);
   }, [scannerToolMode, polygonPoints]);
 
+  // CAD Magnetic Snapping and Polygon Orthogonalization
+  const [enableOrthoSnap, setEnableOrthoSnap] = useState<boolean>(true);
+
+  const cornerAngles = React.useMemo(() => {
+    if (scannerToolMode !== 'polygon_trace') return [];
+    return calculatePolygonCornerAngles(polygonPoints, 2.5);
+  }, [scannerToolMode, polygonPoints]);
+
+  const handleAutoSquare = useCallback(() => {
+    setPolygonPoints((prev) => autoSquarePolygon(prev, 4.0));
+  }, []);
+
   // Width of visible frame at distance D: W_visible = 2 * D * tan(FOV/2)
   const visibleFrameWidthMeters = 2 * estimatedDistanceMeters * Math.tan((calibratedFovAngle * Math.PI) / 360);
   const visibleFrameHeightMeters = visibleFrameWidthMeters / currentAspectRatio;
 
-  const runEdgeDetection = useCallback(() => {
+  const runEdgeDetection = useCallback(async () => {
     const source = isFrozen ? frozenCanvasRef.current : videoRef.current;
     if (!source) return;
 
@@ -194,7 +217,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
       ctx.drawImage(source, 0, 0, w, h);
       const imgData = ctx.getImageData(0, 0, w, h);
-      const result = detectEdgesCanny(imgData.data, w, h, { lowThreshold: 25, highThreshold: 60 });
+      const result = await detectEdgesCannyAsync(imgData.data, w, h, { lowThreshold: 25, highThreshold: 60 });
       setEdgeDetectionResult(result);
       setIsProcessingEdges(false);
     } catch (err) {
@@ -245,6 +268,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
           const photoAspect = canvas.width / canvas.height;
           setCurrentAspectRatio(photoAspect);
+          setStreamResolution(`${canvas.width}×${canvas.height}`);
           setIsFrozen(true);
           setIsStreaming(false);
           setCameraError(null);
@@ -348,24 +372,38 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     setPointB(last.pointB);
   };
 
-  // 2-Point Laser Distance (with optional DeviceOrientation pitch/tilt compensation)
+  // Virtual Bubble Level & Camera Level Evaluation (±1.5° tolerance for construction accuracy)
+  const cameraLevel = React.useMemo(() => {
+    return evaluateCameraLevelness(
+      orientation.pitch,
+      orientation.roll,
+      scannerToolMode === 'polygon_trace' ? 'horizontal_floor_ceiling' : 'vertical_wall',
+      1.5
+    );
+  }, [orientation.pitch, orientation.roll, scannerToolMode]);
+
+  // 2-Point Laser Distance (with 2D pitch+roll perspective compensation)
   const calculateRealDistance = useCallback((): number => {
     if (!pointA || !pointB) return 0;
     const dxPercent = (pointB.x - pointA.x) / 100;
     const dyPercent = (pointB.y - pointA.y) / 100;
 
     const dxMeters = dxPercent * visibleFrameWidthMeters;
-    let dyMeters = dyPercent * visibleFrameHeightMeters;
+    const dyMeters = dyPercent * visibleFrameHeightMeters;
 
-    if (enablePitchCompensation && orientation.pitch !== null) {
-      dyMeters = applyPitchTiltCorrection(
+    if (enablePitchCompensation && (orientation.pitch !== null || orientation.roll !== null)) {
+      const surface = scannerToolMode === 'polygon_trace' ? 'horizontal_floor_ceiling' : 'vertical_wall';
+      const compensated = applyPerspectiveCompensation2D(
+        dxMeters,
         dyMeters,
         orientation.pitch,
-        activeMeasureMode === 'wall_height' ? 90 : 45
+        orientation.roll,
+        surface
       );
+      return compensated.distanceMeters;
     }
 
-    return Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters);
+    return Math.hypot(dxMeters, dyMeters);
   }, [
     pointA,
     pointB,
@@ -373,12 +411,13 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     visibleFrameHeightMeters,
     enablePitchCompensation,
     orientation.pitch,
-    activeMeasureMode,
+    orientation.roll,
+    scannerToolMode,
   ]);
 
   const measuredDistanceM = calculateRealDistance();
 
-  // Multi-Point Polygon Metrics: Perimeter & Real-World Area (Shoelace formula with pitch tilt correction)
+  // Multi-Point Polygon Metrics: Perimeter & Real-World Area (Shoelace formula with 2D perspective correction)
   const calculatePolygonMetrics = useCallback(() => {
     if (polygonPoints.length < 3) return { perimeterM: 0, areaM2: 0, segmentDistances: [] as number[] };
 
@@ -390,12 +429,23 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       const p1 = polygonPoints[i];
       const p2 = polygonPoints[nextIdx];
 
-      const dxM = ((p2.x - p1.x) / 100) * visibleFrameWidthMeters;
-      let dyM = ((p2.y - p1.y) / 100) * visibleFrameHeightMeters;
-      if (enablePitchCompensation && orientation.pitch !== null) {
-        dyM = applyPitchTiltCorrection(dyM, orientation.pitch, 45);
+      const rawDxM = ((p2.x - p1.x) / 100) * visibleFrameWidthMeters;
+      const rawDyM = ((p2.y - p1.y) / 100) * visibleFrameHeightMeters;
+      let segDx = rawDxM;
+      let segDy = rawDyM;
+
+      if (enablePitchCompensation && (orientation.pitch !== null || orientation.roll !== null)) {
+        const comp = applyPerspectiveCompensation2D(
+          rawDxM,
+          rawDyM,
+          orientation.pitch,
+          orientation.roll,
+          'horizontal_floor_ceiling'
+        );
+        segDx = comp.compDxMeters;
+        segDy = comp.compDyMeters;
       }
-      const segDist = Math.hypot(dxM, dyM);
+      const segDist = Math.hypot(segDx, segDy);
       segmentDistances.push(segDist);
       perimeter += segDist;
     }
@@ -406,14 +456,18 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       const p1 = polygonPoints[i];
       const p2 = polygonPoints[nextIdx];
 
-      const x1M = (p1.x / 100) * visibleFrameWidthMeters;
+      let x1M = (p1.x / 100) * visibleFrameWidthMeters;
       let y1M = (p1.y / 100) * visibleFrameHeightMeters;
-      const x2M = (p2.x / 100) * visibleFrameWidthMeters;
+      let x2M = (p2.x / 100) * visibleFrameWidthMeters;
       let y2M = (p2.y / 100) * visibleFrameHeightMeters;
 
-      if (enablePitchCompensation && orientation.pitch !== null) {
-        y1M = applyPitchTiltCorrection(y1M, orientation.pitch, 45);
-        y2M = applyPitchTiltCorrection(y2M, orientation.pitch, 45);
+      if (enablePitchCompensation && (orientation.pitch !== null || orientation.roll !== null)) {
+        const c1 = applyPerspectiveCompensation2D(x1M, y1M, orientation.pitch, orientation.roll, 'horizontal_floor_ceiling');
+        const c2 = applyPerspectiveCompensation2D(x2M, y2M, orientation.pitch, orientation.roll, 'horizontal_floor_ceiling');
+        x1M = c1.compDxMeters;
+        y1M = c1.compDyMeters;
+        x2M = c2.compDxMeters;
+        y2M = c2.compDyMeters;
       }
 
       shoelaceSum += x1M * y2M - x2M * y1M;
@@ -427,6 +481,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
     visibleFrameHeightMeters,
     enablePitchCompensation,
     orientation.pitch,
+    orientation.roll,
   ]);
 
   const polygonMetrics = calculatePolygonMetrics();
@@ -484,8 +539,10 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             setPhotoSourceInfo(null);
             if (videoRef.current && videoRef.current.videoWidth && videoRef.current.videoHeight) {
               setCurrentAspectRatio(videoRef.current.videoWidth / videoRef.current.videoHeight);
+              setStreamResolution(`${videoRef.current.videoWidth}×${videoRef.current.videoHeight}`);
             } else {
               setCurrentAspectRatio(16 / 9);
+              setStreamResolution('1920×1080');
             }
             if (resolvedMode !== mode) setFacingMode(resolvedMode);
             updateContainerRect();
@@ -572,6 +629,7 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
           setIsFrozen(true);
           if (c.width && c.height) {
             setCurrentAspectRatio(c.width / c.height);
+            setStreamResolution(`${c.width}×${c.height}`);
           }
           if (enableAiEdgeAssist) {
             setTimeout(() => runEdgeDetection(), 60);
@@ -724,6 +782,15 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
       const nextIdx = (activeDraggingPolyIdx + 1) % polygonPoints.length;
       const prevP = polygonPoints[prevIdx];
       const nextP = polygonPoints[nextIdx];
+
+      // CAD Magnetic Ortho Snap (0°, 90°, 45°) relative to previous and next anchor points
+      if (enableOrthoSnap && prevP) {
+        const orthoSnap = snapPointToOrtho({ x: rawX, y: rawY }, prevP, 4.0);
+        if (orthoSnap.isSnapped) {
+          finalX = orthoSnap.point.x;
+          finalY = orthoSnap.point.y;
+        }
+      }
 
       // Magnetic snap to horizontal or vertical alignment with neighbors (threshold: 2.2%)
       if (prevP && Math.abs(rawX - prevP.x) < 2.2) finalX = prevP.x;
@@ -965,6 +1032,35 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
             <span>AI Krawędzie{isProcessingEdges ? '...' : ''}</span>
           </button>
 
+          {/* CAD Orthogonal Magnetic Snap & Auto-Square Controls */}
+          {scannerToolMode === 'polygon_trace' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setEnableOrthoSnap((prev) => !prev)}
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition cursor-pointer shadow-xs ${
+                  enableOrthoSnap
+                    ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
+                    : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+                title="Przyciągaj krawędzie ścian do kątów 0°, 90° i 45° (CAD Ortho)"
+              >
+                <Crosshair className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Magnes Kątów</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAutoSquare}
+                className="flex items-center gap-1.5 rounded-xl border border-teal-500/30 bg-teal-950/40 px-3 py-1.5 text-xs font-semibold text-teal-300 hover:bg-teal-900/50 transition cursor-pointer shadow-xs"
+                title="Wyrównaj lekko skośne narożniki do idealnych kątów prostych 90°"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-teal-400" />
+                <span>Kąty 90° (Wyrównaj)</span>
+              </button>
+            </>
+          )}
+
           {/* iOS Safari DeviceOrientation Permission Unlock */}
           {orientation.isSupported && orientation.permissionState === 'default' && (
             <button
@@ -1131,31 +1227,50 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               </div>
             )}
 
-            {/* Virtual Bubble Level Indicator Overlay */}
+            {/* Virtual Bubble Level Indicator Overlay (Dual-Axis 2D Level) */}
             {orientation.isSupported && isStreaming && (
-              <div className="absolute top-3 left-3 z-30 flex items-center gap-2 rounded-xl bg-slate-950/85 backdrop-blur-md px-3 py-1.5 border border-slate-800 text-xs shadow-lg">
+              <div
+                className={`absolute top-3 left-3 z-30 flex items-center gap-2.5 rounded-xl backdrop-blur-md px-3 py-1.5 border text-xs shadow-lg transition-colors duration-200 ${
+                  cameraLevel.isLevel
+                    ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200'
+                    : 'bg-slate-950/85 border-slate-800 text-slate-300'
+                }`}
+              >
                 <Compass
-                  className={`w-3.5 h-3.5 ${orientation.isLevel ? 'text-emerald-400' : 'text-slate-400'}`}
+                  className={`w-3.5 h-3.5 shrink-0 ${cameraLevel.isLevel ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`}
                 />
-                <span className="text-[11px] font-mono text-slate-300">
-                  {orientation.isLevel ? (
-                    <span className="text-emerald-400 font-bold flex items-center gap-1">
-                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      POZIOM {orientation.roll !== null ? `${Math.abs(orientation.roll).toFixed(1)}°` : ''}
-                    </span>
-                  ) : (
-                    <span>Poziom: {orientation.roll !== null ? `${orientation.roll.toFixed(1)}°` : '--'}</span>
-                  )}
-                </span>
-                {/* Bubble Bar */}
-                <div className="w-14 h-2 bg-slate-800 rounded-full relative overflow-hidden flex items-center justify-center border border-slate-700">
-                  <div className="w-0.5 h-full bg-slate-500 absolute" />
+                <div className="flex flex-col">
+                  <div className="text-[11px] font-mono leading-tight flex items-center gap-1.5">
+                    {cameraLevel.isLevel ? (
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        POZIOM OK (±1.5°)
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-slate-300">
+                        {cameraLevel.userMessagePl}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[9px] font-mono text-slate-400">
+                    P:{orientation.pitch !== null ? `${orientation.pitch.toFixed(1)}°` : '--'} | R:{orientation.roll !== null ? `${orientation.roll.toFixed(1)}°` : '--'}
+                  </div>
+                </div>
+
+                {/* 2D Circular Bubble Vial */}
+                <div
+                  className={`w-7 h-7 rounded-full relative flex items-center justify-center border shrink-0 overflow-hidden ${
+                    cameraLevel.isLevel ? 'border-emerald-400/80 bg-emerald-950/50' : 'border-slate-700 bg-slate-900'
+                  }`}
+                  title={cameraLevel.userMessagePl}
+                >
+                  <div className="w-2.5 h-2.5 rounded-full border border-slate-600 absolute pointer-events-none" />
                   <div
                     className={`w-2 h-2 rounded-full absolute transition-all duration-75 ${
-                      orientation.isLevel ? 'bg-emerald-400 scale-125' : 'bg-teal-400'
+                      cameraLevel.isLevel ? 'bg-emerald-400 shadow-xs shadow-emerald-400 scale-110' : 'bg-teal-400'
                     }`}
                     style={{
-                      left: `calc(50% + ${Math.max(-22, Math.min(22, (orientation.roll || 0) * 3))}px - 4px)`,
+                      transform: `translate(${Math.max(-10, Math.min(10, (orientation.roll || 0) * 1.5))}px, ${Math.max(-10, Math.min(10, ((orientation.pitch || 0) - (scannerToolMode === 'polygon_trace' ? 45 : 0)) * 1.5))}px)`,
                     }}
                   />
                 </div>
@@ -1204,19 +1319,15 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
 
             {/* Diagnostics HUD Overlay */}
             {showDiagnostics && (
-              <div className="absolute top-12 right-3 z-30 rounded-xl bg-slate-950/90 border border-slate-700/80 p-3 text-[11px] font-mono text-slate-300 backdrop-blur-md shadow-xl space-y-1 min-w-[210px]">
+              <div className="absolute top-12 right-3 z-30 rounded-xl bg-slate-950/90 border border-slate-700/80 p-3 text-[11px] font-mono text-slate-300 backdrop-blur-md shadow-xl space-y-1 min-w-[220px]">
                 <div className="text-xs font-bold text-teal-400 border-b border-slate-800 pb-1 flex items-center justify-between">
                   <span>Diagnostyka Skanera</span>
-                  <span className="text-[10px] text-slate-500 font-normal">v1.2</span>
+                  <span className="text-[10px] text-slate-500 font-normal">v1.3</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Rozdzielczość:</span>
                   <span className="text-slate-200">
-                    {isFrozen && frozenCanvasRef.current
-                      ? `${frozenCanvasRef.current.width}×${frozenCanvasRef.current.height}`
-                      : videoRef.current?.videoWidth
-                      ? `${videoRef.current.videoWidth}×${videoRef.current.videoHeight}`
-                      : '1920×1080'}
+                    {streamResolution}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1236,9 +1347,15 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
                   <span className="text-teal-300">{estimatedDistanceMeters.toFixed(2)} m</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Pochylenie (Pitch):</span>
-                  <span className="text-slate-200">
-                    {orientation.pitch !== null ? `${orientation.pitch.toFixed(1)}°` : '0.0°'}
+                  <span className="text-slate-500">Kąty (Pitch / Roll):</span>
+                  <span className={cameraLevel.isLevel ? 'text-emerald-400 font-bold' : 'text-slate-200'}>
+                    {orientation.pitch !== null ? `${orientation.pitch.toFixed(1)}°` : '0°'} / {orientation.roll !== null ? `${orientation.roll.toFixed(1)}°` : '0°'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Kompensacja 2D:</span>
+                  <span className={enablePitchCompensation ? 'text-teal-300' : 'text-slate-400'}>
+                    {enablePitchCompensation ? 'Włączona (2D)' : 'Wyłączona'}
                   </span>
                 </div>
               </div>
@@ -1285,14 +1402,23 @@ export const CameraMeasurementScanner: React.FC<CameraMeasurementScannerProps> =
               {/* Grid Canvas Fill */}
               <rect width="100%" height="100%" fill="url(#metric-grid)" />
 
-              {/* Center Crosshair Lens */}
+              {/* Center Crosshair Lens (Emerald when level is achieved) */}
               <g transform="translate(50, 50)">
-                <circle r="4" fill="none" stroke={gridColor} strokeWidth="0.35" strokeOpacity="0.85" />
-                <circle r="0.6" fill={gridColor} />
-                <line x1="-7" y1="0" x2="-4" y2="0" stroke={gridColor} strokeWidth="0.4" />
-                <line x1="4" y1="0" x2="7" y2="0" stroke={gridColor} strokeWidth="0.4" />
-                <line x1="0" y1="-7" x2="0" y2="-4" stroke={gridColor} strokeWidth="0.4" />
-                <line x1="0" y1="4" x2="0" y2="7" stroke={gridColor} strokeWidth="0.4" />
+                <circle
+                  r={cameraLevel.isLevel ? 4.8 : 4}
+                  fill="none"
+                  stroke={cameraLevel.isLevel ? '#10b981' : gridColor}
+                  strokeWidth={cameraLevel.isLevel ? 0.5 : 0.35}
+                  strokeOpacity={cameraLevel.isLevel ? 1 : 0.85}
+                />
+                {cameraLevel.isLevel && (
+                  <circle r={6.2} fill="none" stroke="#10b981" strokeWidth={0.2} strokeDasharray="0.8 0.8" opacity={0.7} />
+                )}
+                <circle r={cameraLevel.isLevel ? 0.8 : 0.6} fill={cameraLevel.isLevel ? '#10b981' : gridColor} />
+                <line x1="-7" y1="0" x2="-4" y2="0" stroke={cameraLevel.isLevel ? '#10b981' : gridColor} strokeWidth={cameraLevel.isLevel ? 0.5 : 0.4} />
+                <line x1="4" y1="0" x2="7" y2="0" stroke={cameraLevel.isLevel ? '#10b981' : gridColor} strokeWidth={cameraLevel.isLevel ? 0.5 : 0.4} />
+                <line x1="0" y1="-7" x2="0" y2="-4" stroke={cameraLevel.isLevel ? '#10b981' : gridColor} strokeWidth={cameraLevel.isLevel ? 0.5 : 0.4} />
+                <line x1="0" y1="4" x2="0" y2="7" stroke={cameraLevel.isLevel ? '#10b981' : gridColor} strokeWidth={cameraLevel.isLevel ? 0.5 : 0.4} />
               </g>
 
               {/* Multi-point Polygon Floor/Wall Outline Mode */}

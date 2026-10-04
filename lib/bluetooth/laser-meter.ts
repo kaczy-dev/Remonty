@@ -202,10 +202,12 @@ export function decodeLaserDataView(dataView: DataView, deviceName?: string): nu
 
 export interface BluetoothConnectionOptions {
   onMeasurement: (event: LaserMeasurementEvent) => void;
-  onStatusChange?: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => void;
+  onStatusChange?: (status: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error') => void;
   onError?: (error: Error) => void;
   playBeep?: boolean;
   haptic?: boolean;
+  autoReconnect?: boolean;
+  maxReconnectAttempts?: number;
 }
 
 /**
@@ -216,18 +218,28 @@ export class BluetoothLaserMeterClient {
   private server: any = null;
   private characteristic: any = null;
   private isConnected = false;
+  private isReconnecting = false;
+  private manualDisconnect = false;
+  private reconnectAttempts = 0;
+  private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private options: BluetoothConnectionOptions;
 
   constructor(options: BluetoothConnectionOptions) {
     this.options = {
       playBeep: true,
       haptic: true,
+      autoReconnect: true,
+      maxReconnectAttempts: 5,
       ...options,
     };
   }
 
   public getConnected(): boolean {
     return this.isConnected;
+  }
+
+  public getReconnecting(): boolean {
+    return this.isReconnecting;
   }
 
   public getDeviceName(): string | null {
@@ -243,6 +255,13 @@ export class BluetoothLaserMeterClient {
       this.options.onError?.(err);
       this.options.onStatusChange?.('error');
       return false;
+    }
+
+    this.manualDisconnect = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimeoutId) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
     }
 
     try {
@@ -364,10 +383,53 @@ export class BluetoothLaserMeterClient {
     this.isConnected = false;
     this.characteristic = null;
     this.server = null;
-    this.options.onStatusChange?.('disconnected');
+
+    if (this.manualDisconnect) {
+      this.isReconnecting = false;
+      this.options.onStatusChange?.('disconnected');
+      return;
+    }
+
+    const shouldAutoReconnect = this.options.autoReconnect ?? true;
+    const maxAttempts = this.options.maxReconnectAttempts ?? 5;
+
+    if (shouldAutoReconnect && this.device && this.reconnectAttempts < maxAttempts) {
+      this.isReconnecting = true;
+      this.reconnectAttempts++;
+      this.options.onStatusChange?.('reconnecting');
+      const delay = Math.min(10000, 1000 * Math.pow(1.5, this.reconnectAttempts - 1));
+
+      this.reconnectTimeoutId = setTimeout(async () => {
+        if (this.manualDisconnect) return;
+        try {
+          if (!this.device?.gatt) throw new Error('Brak interfejsu GATT');
+          this.server = await this.device.gatt.connect();
+          await this.setupNotifications();
+          this.isConnected = true;
+          this.isReconnecting = false;
+          this.reconnectAttempts = 0;
+          this.options.onStatusChange?.('connected');
+          if (this.options.playBeep) playMeasurementBeep();
+        } catch {
+          if (!this.manualDisconnect) {
+            this.handleDisconnect();
+          }
+        }
+      }, delay);
+    } else {
+      this.isReconnecting = false;
+      this.options.onStatusChange?.('disconnected');
+    }
   }
 
   public disconnect(): void {
+    this.manualDisconnect = true;
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimeoutId) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
+    }
     if (this.device?.gatt?.connected) {
       this.device.gatt.disconnect();
     }

@@ -5,21 +5,30 @@ import { MobileBottomNav, MobileBottomNavProps } from './MobileBottomNav';
 
 vi.mock('framer-motion', () => {
   const React = require('react');
+  const MockDiv = React.forwardRef((props: any, ref: any) => {
+    const { animate, initial, exit, transition, ...rest } = props;
+    return <div ref={ref} {...rest} />;
+  });
+  MockDiv.displayName = 'MockDiv';
+
+  const MockButton = React.forwardRef((props: any, ref: any) => {
+    const { animate, initial, exit, transition, ...rest } = props;
+    return <button ref={ref} {...rest} />;
+  });
+  MockButton.displayName = 'MockButton';
+
+  const MockSpan = React.forwardRef((props: any, ref: any) => {
+    const { animate, initial, exit, transition, ...rest } = props;
+    return <span ref={ref} {...rest} />;
+  });
+  MockSpan.displayName = 'MockSpan';
+
   return {
     AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     motion: {
-      div: React.forwardRef((props: any, ref: any) => {
-        const { animate, initial, exit, transition, ...rest } = props;
-        return <div ref={ref} {...rest} />;
-      }),
-      button: React.forwardRef((props: any, ref: any) => {
-        const { animate, initial, exit, transition, ...rest } = props;
-        return <button ref={ref} {...rest} />;
-      }),
-      span: React.forwardRef((props: any, ref: any) => {
-        const { animate, initial, exit, transition, ...rest } = props;
-        return <span ref={ref} {...rest} />;
-      }),
+      div: MockDiv,
+      button: MockButton,
+      span: MockSpan,
     },
   };
 });
